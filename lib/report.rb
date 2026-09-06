@@ -49,6 +49,7 @@ module Report
   end
 
   def stdout_summary(buckets, group_by, io = $stdout)
+    io.print "\n\n" # breathing room between the command line and the table
     label = group_by == 'week' ? 'week of' : group_by
     w = [buckets.map { |b| b['bucket'].to_s.length }.max || 0, label.length].max
     fmt = ["%-#{w}s", '%4s', '%-16s', '%-16s', '%-16s', '%8s', "%-#{BAR}s", '%s'].join(SEP)
