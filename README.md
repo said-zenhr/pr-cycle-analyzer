@@ -41,14 +41,34 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`; 
 | `--base` | `--base main` |
 | `--min-size` / `--max-size` | `--max-size 400` (lines changed) |
 | `--since` / `--until` | `--since 2026-06-01` |
-| `--days` | `--days 90` (window when `--since` is absent) |
-| `--group-by` | `week` (default), `repo`, `author`, `reviewer`, `label` |
-| `--limit` | PRs fetched per repo (default 500) |
+| `--days` | `--days 365` (window when `--since` is absent; `sync` defaults to 90) |
+| `--all` | no time window: fetch every merged PR, report everything on disk |
+| `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `reviewer`, `label` |
+| `--limit` | PRs fetched per repo (default 500, `0` for no cap) |
 | `--no-exclude-bots` | bot filtering is on by default |
 | `--out` | HTML output path |
 | `--no-table` | skip the slowest-PR table on stdout |
 
 Filters compose with AND, and are independent of `--group-by`.
+
+### Windows
+
+Fetching and bucketing are separate. `sync` needs a window or it walks the whole repo history, so it defaults to
+90 days; `report` never truncates what is already on disk unless you ask it to.
+
+```bash
+bin/pr-cycle sync --repo zenhr/zenhr --days 365   # a year of raw
+bin/pr-cycle sync --repo zenhr/zenhr --all        # every merged PR, ever
+bin/pr-cycle report --group-by month              # one row per month
+bin/pr-cycle report --group-by quarter
+bin/pr-cycle report --group-by year
+bin/pr-cycle report --group-by all                # one row, whole dataset
+bin/pr-cycle report --since 2026-01-01 --group-by month
+```
+
+Calendar buckets come off `merged_at` at report time, so widening from week to year never re-fetches. Wider
+buckets are also the fix for the low-weekly-volume problem: a repo with 6 PRs a week has every week suppressed at
+`n < 10` but reads fine by month.
 
 ### Output
 

@@ -24,10 +24,15 @@ module Aggregate
     end
   end
 
-  # group_by: week | repo | author | reviewer | label
+  # group_by: week | month | quarter | year | all | repo | author | reviewer | label
+  # Calendar buckets come off merged_at, so widening the window never needs a re-fetch.
   # reviewer/label fan a PR out into every one of its values.
   def group(rows, key)
     case key
+    when 'month'   then rows.group_by { |r| r['merged_at'][0, 7] }
+    when 'quarter' then rows.group_by { |r| q(r['merged_at']) }
+    when 'year'    then rows.group_by { |r| r['merged_at'][0, 4] }
+    when 'all'     then { 'all time' => rows }
     when 'reviewer', 'label'
       field = key == 'reviewer' ? 'reviewers' : 'labels'
       rows.each_with_object({}) do |r, h|
@@ -61,6 +66,10 @@ module Aggregate
       'bottleneck' => stats.max_by { |_, v| v['median'] || -1 }&.first&.sub('_s', ''),
       'rows' => rows
     }
+  end
+
+  def q(merged_at)
+    "#{merged_at[0, 4]}-Q#{((merged_at[5, 2].to_i - 1) / 3) + 1}"
   end
 
   # Linear interpolation between closest ranks.

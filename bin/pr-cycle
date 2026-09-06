@@ -12,7 +12,7 @@ require 'aggregate'
 require 'report'
 
 ROOT = File.expand_path('..', __dir__)
-opts = { group_by: 'week', limit: 500, days: 90, exclude_bots: true,
+opts = { group_by: 'week', limit: 500, exclude_bots: true,
          out: File.join(ROOT, 'data/computed/report.html'),
          data_dir: File.join(ROOT, 'data') }
 
@@ -29,10 +29,12 @@ parser = OptionParser.new do |o|
   o.on('--max-size N', Integer, 'max lines changed') { |v| opts[:max_size] = v }
   o.on('--since DATE') { |v| opts[:since] = Time.parse(v).utc }
   o.on('--until DATE') { |v| opts[:until] = Time.parse(v).utc }
-  o.on('--days N', Integer, 'backfill window when --since absent (default 90)') { |v| opts[:days] = v }
+  o.on('--days N', Integer, 'window in days; sync defaults to 90, report to everything persisted') { |v| opts[:days] = v }
+  o.on('--all', 'no time window: sync every merged PR, report everything persisted') { opts[:all] = true }
   o.on('--[no-]exclude-bots', 'default: on') { |v| opts[:exclude_bots] = v }
-  o.on('--group-by KEY', %w[week repo author reviewer label]) { |v| opts[:group_by] = v }
-  o.on('--limit N', Integer, 'PRs per repo to fetch (default 500)') { |v| opts[:limit] = v }
+  o.on('--group-by KEY', %w[week month quarter year all repo author reviewer label],
+       'week (default), month, quarter, year, all, repo, author, reviewer, label') { |v| opts[:group_by] = v }
+  o.on('--limit N', Integer, 'PRs per repo to fetch (default 500, 0 = no cap)') { |v| opts[:limit] = v }
   o.on('--data-dir PATH', 'raw+computed root (default ./data)') { |v| opts[:data_dir] = v }
   o.on('--no-table', 'skip the slowest-PR table') { opts[:no_table] = true }
   o.on('--out PATH', 'HTML output path') { |v| opts[:out] = v }
@@ -40,7 +42,12 @@ parser = OptionParser.new do |o|
 end
 parser.parse!
 command = ARGV.shift || 'report'
-opts[:since] ||= (Time.now.utc - opts[:days] * 86_400)
+# sync needs a window or it walks the whole repo history; report should never
+# silently truncate what is already on disk.
+opts[:days] = nil if opts[:all]
+opts[:days] ||= 90 if command == 'sync' && opts[:since].nil? && !opts[:all]
+opts[:since] ||= (Time.now.utc - opts[:days] * 86_400) if opts[:days]
+opts[:limit] = 100_000 if opts[:limit].zero? || opts[:all] # effectively uncapped
 
 config = File.join(ROOT, 'config/ignore.yml')
 ignore_cfg = File.exist?(config) ? (YAML.load_file(config) || {}) : {}
