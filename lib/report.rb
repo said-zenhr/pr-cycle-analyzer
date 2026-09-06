@@ -50,7 +50,8 @@ module Report
     io.puts bold(head, io)
     io.puts dim('─' * head.length, io)
 
-    buckets.each do |b|
+    buckets.each_with_index do |b, i|
+      io.puts dim('┈' * head.length, io) if i.positive?
       if b['suppressed']
         io.puts dim(format("%-#{w}s  %4d  n < #{Aggregate::MIN_N}, suppressed", b['bucket'], b['n']), io)
         next
@@ -94,8 +95,11 @@ module Report
     return if top.empty?
     w = top.map { |r| "#{r['repo']}##{r['number']}".length }.max
     io.puts "\n#{bold("slowest #{top.size} PRs", io)}"
-    io.puts bold(format("%-#{w}s  %8s  %8s  %8s  %8s  %-14s  %s", 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title'), io)
-    top.each do |r|
+    head = format("%-#{w}s  %8s  %8s  %8s  %8s  %-14s  %s", 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title')
+    io.puts bold(head, io)
+    io.puts dim('─' * head.length, io)
+    top.each_with_index do |r, i|
+      io.puts dim('┈' * head.length, io) if i.positive?
       io.puts format("%-#{w}s  %s  %s  %s  %s  %-14s  %s",
                      "#{r['repo']}##{r['number']}",
                      pad(bold(format('%8s', h(r['total_s'], 0)), io), 8),
