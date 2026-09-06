@@ -36,6 +36,7 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`; 
 |---|---|
 | `--repo` | `--repo zenhr/zenhr --repo zenhr/mfe-monorepo` |
 | `--author` | `--author said-zenhr` |
+| `--team` | `--team platform-engineering` (needs `config/teams.yml`) |
 | `--reviewer` | `--reviewer diyaa-zen` |
 | `--label` | `--label backend` |
 | `--base` | `--base main` |
@@ -43,7 +44,7 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`; 
 | `--since` / `--until` | `--since 2026-06-01` |
 | `--days` | `--days 365` (window when `--since` is absent; `sync` defaults to 90) |
 | `--all` | no time window: fetch every merged PR, report everything on disk |
-| `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `reviewer`, `label` |
+| `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `team`, `reviewer`, `label` |
 | `--limit` | PRs fetched per repo (default 500, `0` for no cap) |
 | `--no-exclude-bots` | bot filtering is on by default |
 | `--out` | HTML output path |
@@ -76,6 +77,24 @@ Stdout is a colour-coded table: one row per bucket, median and p75 per stage, a 
 dominant stage named — followed by the slowest 10 PRs with their per-stage breakdown and flags. Colour follows the
 terminal: on when stdout is a TTY, off when piped or when `NO_COLOR` is set (the split bar falls back to `#`/`=`/`.`),
 forced on with `FORCE_COLOR=1`.
+
+### Teams
+
+```bash
+bin/pr-cycle teams --repo zenhr/zenhr   # write config/teams.yml from the org's GitHub teams
+bin/pr-cycle report --group-by team
+bin/pr-cycle report --team money-team --group-by month
+```
+
+A PR's team is its author's team. `teams.yml` is a plain `team: [logins]` map — edit it, it is not overwritten
+until you re-run `teams`.
+
+GitHub teams overlap: access groups like `developers` or `zenhr-deployment` contain half the org and would
+otherwise swallow every squad. `teams` writes smallest team first and the lookup takes the first match, so squads
+win. Delete the access groups from `teams.yml` and the split gets sharper. Authors matched by more than one team
+are reported on stderr.
+
+Team-level is also the grouping to reach for before `--author` — same signal, no per-person surface.
 
 ### On `--author`
 

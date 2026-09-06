@@ -12,6 +12,7 @@ module Aggregate
     rows.select do |r|
       next false if opts[:repo]     && !opts[:repo].include?(r['repo'])
       next false if opts[:author]   && !opts[:author].include?(r['author'])
+      next false if opts[:team]     && !opts[:team].include?(r['team'])
       next false if opts[:reviewer] && (opts[:reviewer] & r['reviewers']).empty?
       next false if opts[:label]    && (opts[:label] & r['labels']).empty?
       next false if opts[:base]     && !opts[:base].include?(r['base_branch'])

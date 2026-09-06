@@ -117,6 +117,15 @@ module Fetch
     end
   end
 
+  # org teams -> {team slug => [logins]}, for --group-by team. Smallest teams
+  # first, so squads win over org-wide access groups on the first-match lookup.
+  def teams(org)
+    gh('api', "/orgs/#{org}/teams", '--paginate').each_with_object({}) do |team, out|
+      members = gh('api', "/orgs/#{org}/teams/#{team['slug']}/members", '--paginate').map { |m| m['login'] }
+      out[team['slug']] = members.sort unless members.empty?
+    end.sort_by { |_, members| members.size }.to_h
+  end
+
   # Latest persisted raw file per repo, for recompute without re-fetch.
   def load_raw(data_dir: 'data', repos: nil)
     Dir.glob(File.join(data_dir, 'raw', '*', '*', '*.json')).group_by { |p| p.split('/')[-3, 2].join('/') }
