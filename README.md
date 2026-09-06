@@ -46,8 +46,16 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`; 
 | `--limit` | PRs fetched per repo (default 500) |
 | `--no-exclude-bots` | bot filtering is on by default |
 | `--out` | HTML output path |
+| `--no-table` | skip the slowest-PR table on stdout |
 
 Filters compose with AND, and are independent of `--group-by`.
+
+### Output
+
+Stdout is a colour-coded table: one row per bucket, median and p75 per stage, a proportional split bar, and the
+dominant stage named — followed by the slowest 10 PRs with their per-stage breakdown and flags. Colour follows the
+terminal: on when stdout is a TTY, off when piped or when `NO_COLOR` is set (the split bar falls back to `#`/`=`/`.`),
+forced on with `FORCE_COLOR=1`.
 
 ### On `--author`
 

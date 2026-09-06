@@ -16,17 +16,94 @@ module Report
     seconds.nil? ? '—' : format("%.#{digits}fh", hours(seconds))
   end
 
+  # 256-colour ANSI, matched to the chart's segment colours. NO_COLOR or a pipe turns it off.
+  ANSI = { 'pickup_s' => 208, 'review_s' => 35, 'merge_wait_s' => 98 }.freeze
+  BAR = 24
+
+  def color?(io)
+    return false unless ENV['NO_COLOR'].to_s.empty?
+    io.tty? || !ENV['FORCE_COLOR'].to_s.empty?
+  end
+
+  def fg(text, code, io)
+    color?(io) ? "\e[38;5;#{code}m#{text}\e[0m" : text
+  end
+
+  def bg(text, code, io)
+    color?(io) ? "\e[48;5;#{code}m#{text}\e[0m" : text
+  end
+
+  def dim(text, io)
+    color?(io) ? "\e[2m#{text}\e[0m" : text
+  end
+
+  def bold(text, io)
+    color?(io) ? "\e[1m#{text}\e[0m" : text
+  end
+
   def stdout_summary(buckets, group_by, io = $stdout)
+    label = group_by == 'week' ? 'week of' : group_by
+    w = [buckets.map { |b| b['bucket'].to_s.length }.max || 0, label.length].max
+    fmt = "%-#{w}s  %4s  %-16s  %-16s  %-16s  %8s  %-#{BAR}s  %s"
+
+    head = format(fmt, label, 'n', 'pickup', 'review', 'merge-wait', 'total', 'split', 'bottleneck')
+    io.puts bold(head, io)
+    io.puts dim('─' * head.length, io)
+
     buckets.each do |b|
-      head = "#{group_by == 'week' ? 'week of ' : ''}#{b['bucket']}"
       if b['suppressed']
-        io.puts "#{head}: n=#{b['n']} (suppressed)"
+        io.puts dim(format("%-#{w}s  %4d  n < #{Aggregate::MIN_N}, suppressed", b['bucket'], b['n']), io)
         next
       end
-      s = b['stages']
-      io.puts "#{head}: pickup #{h(s['pickup_s']['median'])} (p75 #{h(s['pickup_s']['p75'], 0)}) · " \
-              "review #{h(s['review_s']['median'])} · merge-wait #{h(s['merge_wait_s']['median'])}"
-      io.puts "#{' ' * (head.length + 2)}n=#{b['n']} · #{b['flagged']} flagged → bottleneck: #{b['bottleneck']}"
+      st = b['stages']
+      cells = ANSI.map do |seg, code|
+        pad(fg(format('%7s', h(st[seg]['median'])), code, io) + dim(format(' p75 %-5s', h(st[seg]['p75'], 0)), io), 16)
+      end
+      io.puts format(fmt.sub('%4s', '%4d'), b['bucket'], b['n'], *cells,
+                     bold(format('%8s', h(b['total']['median'])), io),
+                     pad(bar(b, io), BAR),
+                     fg(b['bottleneck'], ANSI.fetch("#{b['bottleneck'].tr('-', '_')}_s", 7), io))
+      next if b['flagged'].zero?
+      note = "#{b['flagged']} flagged" + (b['clamped'].positive? ? ", #{b['clamped']} clamped and excluded" : '')
+      io.puts dim(format("%-#{w}s  %4s  %s", '', '', note), io)
+    end
+
+    marks = color?(io) ? ['  ', '  ', '  '] : %w[## == ..]
+    key = ANSI.values.each_with_index.map { |code, i| bg(marks[i], code, io) + ' ' + LABELS.values[i] }.join('   ')
+    io.puts "\n#{dim('median per stage, p75 beside it  ·  ', io)}#{key}"
+  end
+
+  # printf counts escape bytes, so pad on visible width.
+  def pad(text, width)
+    text + ' ' * [width - text.gsub(/\e\[[\d;]*m/, '').length, 0].max
+  end
+
+  # Proportional stacked bar, same three colours as the chart.
+  def bar(bucket, io)
+    values = ANSI.keys.map { |seg| bucket['stages'][seg]['median'] || 0 }
+    total = values.sum
+    return '' if total.zero?
+    widths = values.map { |v| (v / total * BAR).round }
+    widths[values.index(values.max)] += BAR - widths.sum
+    chars = color?(io) ? [' ', ' ', ' '] : %w[# = .]
+    ANSI.values.each_with_index.map { |code, i| bg(chars[i] * widths[i], code, io) }.join
+  end
+
+  def slowest_table(rows, io = $stdout, limit = 10)
+    top = slowest(rows, limit)
+    return if top.empty?
+    w = top.map { |r| "#{r['repo']}##{r['number']}".length }.max
+    io.puts "\n#{bold("slowest #{top.size} PRs", io)}"
+    io.puts bold(format("%-#{w}s  %8s  %8s  %8s  %8s  %-14s  %s", 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title'), io)
+    top.each do |r|
+      io.puts format("%-#{w}s  %s  %s  %s  %s  %-14s  %s",
+                     "#{r['repo']}##{r['number']}",
+                     pad(bold(format('%8s', h(r['total_s'], 0)), io), 8),
+                     pad(fg(format('%8s', h(r['pickup_s'], 0)), ANSI['pickup_s'], io), 8),
+                     pad(fg(format('%8s', h(r['review_s'], 0)), ANSI['review_s'], io), 8),
+                     pad(fg(format('%8s', h(r['merge_wait_s'], 0)), ANSI['merge_wait_s'], io), 8),
+                     r['author'].to_s[0, 14], dim(r['title'].to_s[0, 48], io))
+      io.puts dim(format("%-#{w}s  %s", '', r['flags'].join(' ')), io) unless r['flags'].empty?
     end
   end
 
