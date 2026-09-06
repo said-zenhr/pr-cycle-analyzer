@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+require 'optparse'
+require 'json'
+require 'yaml'
+require 'time'
+require 'fileutils'
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'fetch'
+require 'compute'
+require 'aggregate'
+require 'report'
+
+ROOT = File.expand_path('..', __dir__)
+opts = { group_by: 'week', limit: 500, days: 90, exclude_bots: true,
+         out: File.join(ROOT, 'data/computed/report.html'),
+         data_dir: File.join(ROOT, 'data') }
+
+parser = OptionParser.new do |o|
+  o.banner = "usage: pr-cycle [sync|report] [options]\n" \
+             "  sync    fetch from GitHub, persist raw, recompute\n" \
+             "  report  recompute from persisted raw (default)\n\n"
+  o.on('--repo ORG/REPO', 'repeatable') { |v| (opts[:repo] ||= []) << v }
+  o.on('--author LOGIN', 'repeatable') { |v| (opts[:author] ||= []) << v }
+  o.on('--reviewer LOGIN', 'repeatable') { |v| (opts[:reviewer] ||= []) << v }
+  o.on('--label NAME', 'repeatable') { |v| (opts[:label] ||= []) << v }
+  o.on('--base BRANCH', 'repeatable') { |v| (opts[:base] ||= []) << v }
+  o.on('--min-size N', Integer, 'min lines changed') { |v| opts[:min_size] = v }
+  o.on('--max-size N', Integer, 'max lines changed') { |v| opts[:max_size] = v }
+  o.on('--since DATE') { |v| opts[:since] = Time.parse(v).utc }
+  o.on('--until DATE') { |v| opts[:until] = Time.parse(v).utc }
+  o.on('--days N', Integer, 'backfill window when --since absent (default 90)') { |v| opts[:days] = v }
+  o.on('--[no-]exclude-bots', 'default: on') { |v| opts[:exclude_bots] = v }
+  o.on('--group-by KEY', %w[week repo author reviewer label]) { |v| opts[:group_by] = v }
+  o.on('--limit N', Integer, 'PRs per repo to fetch (default 500)') { |v| opts[:limit] = v }
+  o.on('--data-dir PATH', 'raw+computed root (default ./data)') { |v| opts[:data_dir] = v }
+  o.on('--out PATH', 'HTML output path') { |v| opts[:out] = v }
+  o.on('-h', '--help') { puts o; exit }
+end
+parser.parse!
+command = ARGV.shift || 'report'
+opts[:since] ||= (Time.now.utc - opts[:days] * 86_400)
+
+config = File.join(ROOT, 'config/ignore.yml')
+ignore_cfg = File.exist?(config) ? (YAML.load_file(config) || {}) : {}
+bots = opts[:exclude_bots] ? (ignore_cfg['bots'] || []) : []
+
+case command
+when 'sync'
+  repos = opts[:repo] || ignore_cfg['repos']
+  abort 'sync needs --repo ORG/REPO (or a repos: list in config/ignore.yml)' if repos.nil? || repos.empty?
+  raws = repos.map do |repo|
+    warn "syncing #{repo}..."
+    Fetch.sync(repo, limit: opts[:limit], since: opts[:since], data_dir: opts[:data_dir])
+  end
+when 'report'
+  raws = Fetch.load_raw(data_dir: opts[:data_dir], repos: opts[:repo])
+  abort "no raw data in #{opts[:data_dir]}/raw — run `pr-cycle sync --repo ORG/REPO` first" if raws.empty?
+else
+  abort parser.to_s
+end
+
+rows = raws.flat_map do |raw|
+  Compute.rows(raw, bot_denylist: bots, ignore: (ignore_cfg.dig('ignore', raw['repo']) || []))
+end
+
+# rule 2, on the real backfill and not just fixtures.
+bad = rows.reject { |r| r['total_s'].nil? }
+          .reject { |r| ((r['pickup_s'] + r['review_s'] + r['merge_wait_s']) - r['total_s']).abs < 1 }
+abort "segments-sum-to-total violated on #{bad.size} PRs: #{bad.first(5).map { |r| r['url'] }.join(', ')}" unless bad.empty?
+
+path = File.join(ROOT, 'data/computed/prs.json')
+FileUtils.mkdir_p(File.dirname(path))
+File.write(path, JSON.pretty_generate(rows))
+
+filtered = Aggregate.filter(rows, opts)
+if filtered.empty?
+  warn "no PRs matched (#{rows.size} computed)"
+  exit 1
+end
+
+buckets = Aggregate.buckets(filtered, opts[:group_by])
+Report.stdout_summary(buckets, opts[:group_by])
+clamped = filtered.count { |r| r['flags'].include?('clamped_negative') }
+warn "#{clamped} PRs clamped (negative durations, excluded from aggregates)" if clamped.positive?
+warn "rows -> #{path}"
+warn "chart -> #{Report.html(buckets, filtered, opts[:group_by], opts[:out])}"

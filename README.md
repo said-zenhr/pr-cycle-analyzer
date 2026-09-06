@@ -1,0 +1,101 @@
+# PR Cycle Time Analyzer
+
+Where PRs actually wait. Weekly median and p75 per stage, per repo, with the dominant stage named.
+
+Plain Ruby (stdlib only — no Gemfile, no Rails). Auth comes from `gh`, so there is no PAT to manage.
+
+## Stage model
+
+Anchored on **ready-for-review**, not PR creation:
+
+| Segment | From | To |
+|---|---|---|
+| `pickup` | ready for review | first human response (review or comment) |
+| `review` | first response | last approval |
+| `merge_wait` | last approval | merged |
+| `draft` (informational) | PR created | ready for review |
+
+`pickup + review + merge_wait` always equals total cycle time (ready → merged). That invariant is asserted per PR
+on every run, not just in the tests — a violation aborts the run rather than printing a wrong number.
+`draft` is reported separately and excluded from cycle time.
+
+## Usage
+
+```bash
+bin/pr-cycle sync --repo zenhr/zenhr --days 90   # fetch from GitHub, persist raw, report
+bin/pr-cycle report --group-by author            # recompute from persisted raw, no network
+```
+
+`sync` writes `data/raw/<repo>/<date>.json` and every report recomputes from those files, so stage definitions
+can change without re-fetching. Computed rows land in `data/computed/prs.json`; the chart in
+`data/computed/report.html`.
+
+### Flags
+
+| Flag | Example |
+|---|---|
+| `--repo` | `--repo zenhr/zenhr --repo zenhr/mfe-monorepo` |
+| `--author` | `--author said-zenhr` |
+| `--reviewer` | `--reviewer diyaa-zen` |
+| `--label` | `--label backend` |
+| `--base` | `--base main` |
+| `--min-size` / `--max-size` | `--max-size 400` (lines changed) |
+| `--since` / `--until` | `--since 2026-06-01` |
+| `--days` | `--days 90` (window when `--since` is absent) |
+| `--group-by` | `week` (default), `repo`, `author`, `reviewer`, `label` |
+| `--limit` | PRs fetched per repo (default 500) |
+| `--no-exclude-bots` | bot filtering is on by default |
+| `--out` | HTML output path |
+
+Filters compose with AND, and are independent of `--group-by`.
+
+### On `--author`
+
+`--author` turns this into per-person cycle time. Middleware deliberately keeps its metrics team-level for that
+reason. Both `--author` and `--reviewer` ship, output stays local, and no per-author view gets published to a
+shared channel. This is not performance review input.
+
+## Correctness rules
+
+All of them live in `lib/compute.rb`, which is a pure function (raw JSON → rows: no I/O, no network) and is where
+the tests point.
+
+1. Anchored on `ready_for_review` from the issue timeline. For PRs opened non-draft, ready == created.
+2. Segments sum to total. Asserted per PR in tests *and* on every real run.
+3. Broken review chains fall back so no elapsed time disappears: no approval → `review` runs to merge;
+   no review at all → the whole span is `pickup`.
+4. Bots excluded before anything is computed. GitHub Apps often appear without an `is_bot` flag and without the
+   `[bot]` suffix (`coderabbitai`, `github-actions`), so `config/ignore.yml` carries an explicit deny-list.
+5. Events after merge (approval-after-merge, post-close review) are dropped rather than allowed to go negative.
+   Genuinely impossible spans (clock skew) clamp to `nil`, are flagged `clamped_negative`, counted, and reported.
+6. `nil` means not applicable and is excluded from aggregates. `0` means a genuine zero. Never conflated.
+7. Open and closed-unmerged PRs excluded.
+8. Buckets under 10 PRs print `n=X (suppressed)` instead of a median.
+9. Parked PRs are excluded by number via `config/ignore.yml`.
+
+## Config
+
+`config/ignore.yml` holds the default repo list, the per-repo PR ignore-list, and extra bot logins.
+
+## Tests
+
+```bash
+ruby test/test_compute.rb
+```
+
+Fixtures in `test/fixtures/raw.json` cover each edge case: draft PR, no-review merge, review-without-approval,
+bot-only review, approval-after-merge, force-pushed PR, clock skew, open PR, ignored PR.
+
+## Answers to the PRD's open questions
+
+- **Repos in v1** — whatever `--repo` names; `config/ignore.yml` holds the default list, currently `zenhr/zenhr`.
+- **Backfill window** — 90 days, via `--days` (override with `--since`).
+- **Cron or manual** — manual. A GitHub Action would publish per-author numbers into a shared place, which is
+  exactly what the filtering section rules out for v1.
+
+## Known limits
+
+- `gh pr list` has no cursor and 502/504s on large repos past ~25 PRs when reviews and comments are attached, so
+  the fetcher pages backwards through `created:` date windows and retries 5xx. Backfills beyond a few hundred PRs
+  are slow.
+- No incremental sync: each `sync` re-fetches the whole window.

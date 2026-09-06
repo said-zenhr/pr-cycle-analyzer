@@ -1,0 +1,93 @@
+{
+  "repo": "acme/app",
+  "fetched_at": "2026-09-06T00:00:00Z",
+  "prs": [
+    {
+      "number": 1, "title": "opened as draft", "url": "u/1",
+      "author": {"login": "alice"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-03T00:00:00Z",
+      "isDraft": false, "labels": [{"name": "backend"}], "baseRefName": "main",
+      "additions": 100, "deletions": 20, "changedFiles": 3,
+      "reviews": [
+        {"author": {"login": "bob"}, "state": "COMMENTED", "submittedAt": "2026-09-02T02:00:00Z"},
+        {"author": {"login": "bob"}, "state": "APPROVED", "submittedAt": "2026-09-02T12:00:00Z"}
+      ],
+      "comments": []
+    },
+    {
+      "number": 2, "title": "no review merge", "url": "u/2",
+      "author": {"login": "alice"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T05:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 1, "deletions": 1, "changedFiles": 1,
+      "reviews": [], "comments": []
+    },
+    {
+      "number": 3, "title": "review without approval", "url": "u/3",
+      "author": {"login": "carol"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T10:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [{"author": {"login": "bob"}, "state": "COMMENTED", "submittedAt": "2026-09-01T04:00:00Z"}],
+      "comments": []
+    },
+    {
+      "number": 4, "title": "bot only review", "url": "u/4",
+      "author": {"login": "carol"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T08:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [{"author": {"login": "sonarcloud[bot]", "is_bot": true}, "state": "APPROVED", "submittedAt": "2026-09-01T01:00:00Z"}],
+      "comments": [{"author": {"login": "dependabot"}, "createdAt": "2026-09-01T02:00:00Z"},
+                   {"author": {"login": "carol"}, "createdAt": "2026-09-01T03:00:00Z"}]
+    },
+    {
+      "number": 5, "title": "approval after merge", "url": "u/5",
+      "author": {"login": "alice"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T06:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [{"author": {"login": "bob"}, "state": "COMMENTED", "submittedAt": "2026-09-01T02:00:00Z"},
+                  {"author": {"login": "bob"}, "state": "APPROVED", "submittedAt": "2026-09-02T00:00:00Z"}],
+      "comments": []
+    },
+    {
+      "number": 6, "title": "force pushed", "url": "u/6",
+      "author": {"login": "dave"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-02T00:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "release",
+      "additions": 900, "deletions": 100, "changedFiles": 40,
+      "reviews": [{"author": {"login": "bob"}, "state": "APPROVED", "submittedAt": "2026-09-01T12:00:00Z"}],
+      "comments": []
+    },
+    {
+      "number": 7, "title": "ready after merge, clock skew", "url": "u/7",
+      "author": {"login": "dave"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T01:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [], "comments": []
+    },
+    {
+      "number": 8, "title": "still open", "url": "u/8",
+      "author": {"login": "dave"},
+      "createdAt": "2026-09-01T00:00:00Z", "mergedAt": null,
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [], "comments": []
+    },
+    {
+      "number": 9, "title": "ignored, parked for weeks", "url": "u/9",
+      "author": {"login": "dave"},
+      "createdAt": "2026-06-01T00:00:00Z", "mergedAt": "2026-09-01T00:00:00Z",
+      "isDraft": false, "labels": [], "baseRefName": "main",
+      "additions": 5, "deletions": 0, "changedFiles": 1,
+      "reviews": [], "comments": []
+    }
+  ],
+  "timeline": {
+    "1": [{"__typename": "ReadyForReviewEvent", "createdAt": "2026-09-02T00:00:00Z"}],
+    "6": [{"__typename": "HeadRefForcePushedEvent", "createdAt": "2026-09-01T06:00:00Z"}],
+    "7": [{"__typename": "ReadyForReviewEvent", "createdAt": "2026-09-01T02:00:00Z"}]
+  }
+}

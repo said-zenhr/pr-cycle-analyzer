@@ -1,0 +1,18 @@
+# Repos synced when --repo is not passed.
+repos:
+  - zenhr/zenhr
+
+# Parked PRs picked up weeks later dominate the tail. Exclude by number, per repo.
+ignore:
+  zenhr/zenhr: []
+
+# Extra bot logins. Anything ending in [bot], or with is_bot set, is already excluded.
+bots:
+  # GitHub Apps show up here without the [bot] suffix and without is_bot, so name them.
+  - coderabbitai
+  - github-actions
+  - copilot-pull-request-reviewer
+  - dependabot
+  - renovate
+  - codecov
+  - sonarcloud
