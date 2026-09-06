@@ -41,24 +41,31 @@ module Report
     color?(io) ? "\e[1m#{text}\e[0m" : text
   end
 
+  SEP = ' │ '.freeze
+
+  # A rule the same shape as the header, crossed wherever a column divider sits.
+  def rule(head, char, io)
+    dim(head.chars.map { |c| c == '│' ? '┼' : char }.join, io)
+  end
+
   def stdout_summary(buckets, group_by, io = $stdout)
     label = group_by == 'week' ? 'week of' : group_by
     w = [buckets.map { |b| b['bucket'].to_s.length }.max || 0, label.length].max
-    fmt = "%-#{w}s  %4s  %-16s  %-16s  %-16s  %8s  %-#{BAR}s  %s"
+    fmt = ["%-#{w}s", '%4s', '%-16s', '%-16s', '%-16s', '%8s', "%-#{BAR}s", '%s'].join(SEP)
 
     head = format(fmt, label, 'n', 'pickup', 'review', 'merge-wait', 'total', 'split', 'bottleneck')
     io.puts bold(head, io)
-    io.puts dim('─' * head.length, io)
+    io.puts rule(head, '─', io)
 
     buckets.each_with_index do |b, i|
-      io.puts dim('┈' * head.length, io) if i.positive?
+      io.puts rule(head, '┈', io) if i.positive?
       if b['suppressed']
-        io.puts dim(format("%-#{w}s  %4d  n < #{Aggregate::MIN_N}, suppressed", b['bucket'], b['n']), io)
+        io.puts dim(format("%-#{w}s#{SEP}%4d#{SEP}n < #{Aggregate::MIN_N}, suppressed", b['bucket'], b['n']), io)
         next
       end
       st = b['stages']
       cells = ANSI.map do |seg, code|
-        pad(fg(format('%7s', h(st[seg]['median'])), code, io) + dim(format(' p75 %-5s', h(st[seg]['p75'], 0)), io), 16)
+        pad(fg(format('%7s', h(st[seg]['median'])), code, io) + dim(format(' p75 %-4s', h(st[seg]['p75'], 0)), io), 16)
       end
       io.puts format(fmt.sub('%4s', '%4d'), b['bucket'], b['n'], *cells,
                      bold(format('%8s', h(b['total']['median'])), io),
@@ -66,7 +73,7 @@ module Report
                      fg(b['bottleneck'], ANSI.fetch("#{b['bottleneck'].tr('-', '_')}_s", 7), io))
       next if b['flagged'].zero?
       note = "#{b['flagged']} flagged" + (b['clamped'].positive? ? ", #{b['clamped']} clamped and excluded" : '')
-      io.puts dim(format("%-#{w}s  %4s  %s", '', '', note), io)
+      io.puts dim(format("%-#{w}s#{SEP}%4s#{SEP}%s", '', '', note), io)
     end
 
     marks = color?(io) ? ['  ', '  ', '  '] : %w[## == ..]
@@ -95,19 +102,20 @@ module Report
     return if top.empty?
     w = top.map { |r| "#{r['repo']}##{r['number']}".length }.max
     io.puts "\n#{bold("slowest #{top.size} PRs", io)}"
-    head = format("%-#{w}s  %8s  %8s  %8s  %8s  %-14s  %s", 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title')
+    fmt = ["%-#{w}s", '%8s', '%8s', '%8s', '%8s', '%-14s', '%-48s'].join(SEP)
+    head = format(fmt, 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title')
     io.puts bold(head, io)
-    io.puts dim('─' * head.length, io)
+    io.puts rule(head, '─', io)
     top.each_with_index do |r, i|
-      io.puts dim('┈' * head.length, io) if i.positive?
-      io.puts format("%-#{w}s  %s  %s  %s  %s  %-14s  %s",
+      io.puts rule(head, '┈', io) if i.positive?
+      io.puts format(fmt,
                      "#{r['repo']}##{r['number']}",
                      pad(bold(format('%8s', h(r['total_s'], 0)), io), 8),
                      pad(fg(format('%8s', h(r['pickup_s'], 0)), ANSI['pickup_s'], io), 8),
                      pad(fg(format('%8s', h(r['review_s'], 0)), ANSI['review_s'], io), 8),
                      pad(fg(format('%8s', h(r['merge_wait_s'], 0)), ANSI['merge_wait_s'], io), 8),
                      r['author'].to_s[0, 14], dim(r['title'].to_s[0, 48], io))
-      io.puts dim(format("%-#{w}s  %s", '', r['flags'].join(' ')), io) unless r['flags'].empty?
+      io.puts dim(format("%-#{w}s#{SEP}%s", '', r['flags'].join(' ')), io) unless r['flags'].empty?
     end
   end
 
