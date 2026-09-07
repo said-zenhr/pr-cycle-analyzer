@@ -38,13 +38,14 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`; 
 | `--author` | `--author said-zenhr` |
 | `--team` | `--team platform-engineering` (needs `config/teams.yml`) |
 | `--reviewer` | `--reviewer diyaa-zen` |
+| `--person` | `--person diyaa-zen` (both roles, repeatable; implies `--group-by person`) |
 | `--label` | `--label backend` |
 | `--base` | `--base main` |
 | `--min-size` / `--max-size` | `--max-size 400` (lines changed) |
 | `--since` / `--until` | `--since 2026-06-01` |
 | `--days` | `--days 365` (window when `--since` is absent; `sync` defaults to 90) |
 | `--all` | no time window: fetch every merged PR, report everything on disk |
-| `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `team`, `reviewer`, `label` |
+| `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `team`, `person`, `reviewer`, `label` |
 | `--limit` | PRs fetched per repo (default 500, `0` for no cap) |
 | `--no-exclude-bots` | bot filtering is on by default |
 | `--out` | HTML output path |
@@ -95,6 +96,23 @@ win. Delete the access groups from `teams.yml` and the split gets sharper. Autho
 are reported on stderr.
 
 Team-level is also the grouping to reach for before `--author` — same signal, no per-person surface.
+
+### By engineer
+
+```bash
+bin/pr-cycle report --group-by author      # everyone, PRs they wrote
+bin/pr-cycle report --group-by reviewer    # everyone, PRs they reviewed
+bin/pr-cycle report --person diyaa-zen     # one engineer, a row per role
+bin/pr-cycle report --author diyaa-zen --group-by month
+```
+
+`--person` is repeatable and gives two rows per name — `— author` and `— reviewer`. The same PR appears in both
+rows when the person wrote one and reviewed the other, which is the point: it separates "my PRs wait" from "PRs I
+review wait".
+
+Read the reviewer rows carefully. `pickup` is always the PR's own pickup — time until the *first* human responded,
+whoever that was — not time until this reviewer responded. So a reviewer row says "the PRs this person ended up on
+waited N hours", not "this person took N hours".
 
 ### On `--author`
 

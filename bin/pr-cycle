@@ -25,6 +25,10 @@ parser = OptionParser.new do |o|
   o.on('--author LOGIN', 'repeatable') { |v| (opts[:author] ||= []) << v }
   o.on('--team NAME', 'repeatable; needs config/teams.yml') { |v| (opts[:team] ||= []) << v }
   o.on('--reviewer LOGIN', 'repeatable') { |v| (opts[:reviewer] ||= []) << v }
+  o.on('--person LOGIN', 'repeatable; one row per role, authored and reviewed') do |v|
+    (opts[:person] ||= []) << v
+    opts[:group_by] = 'person'
+  end
   o.on('--label NAME', 'repeatable') { |v| (opts[:label] ||= []) << v }
   o.on('--base BRANCH', 'repeatable') { |v| (opts[:base] ||= []) << v }
   o.on('--min-size N', Integer, 'min lines changed') { |v| opts[:min_size] = v }
@@ -34,8 +38,8 @@ parser = OptionParser.new do |o|
   o.on('--days N', Integer, 'window in days; sync defaults to 90, report to everything persisted') { |v| opts[:days] = v }
   o.on('--all', 'no time window: sync every merged PR, report everything persisted') { opts[:all] = true }
   o.on('--[no-]exclude-bots', 'default: on') { |v| opts[:exclude_bots] = v }
-  o.on('--group-by KEY', %w[week month quarter year all repo author team reviewer label],
-       'week (default), month, quarter, year, all, repo, author, team, reviewer, label') { |v| opts[:group_by] = v }
+  o.on('--group-by KEY', %w[week month quarter year all repo author team person reviewer label],
+       'week (default), month, quarter, year, all, repo, author, team, person, reviewer, label') { |v| opts[:group_by] = v }
   o.on('--limit N', Integer, 'PRs per repo to fetch (default 500, 0 = no cap)') { |v| opts[:limit] = v }
   o.on('--data-dir PATH', 'raw+computed root (default ./data)') { |v| opts[:data_dir] = v }
   o.on('--no-table', 'skip the slowest-PR table') { opts[:no_table] = true }
@@ -122,7 +126,8 @@ if filtered.empty?
   exit 1
 end
 
-buckets = Aggregate.buckets(filtered, opts[:group_by])
+abort '--group-by person needs at least one --person LOGIN' if opts[:group_by] == 'person' && opts[:person].nil?
+buckets = Aggregate.buckets(filtered, opts[:group_by], opts[:person])
 Report.stdout_summary(buckets, opts[:group_by])
 Report.slowest_table(filtered) unless opts[:no_table]
 clamped = filtered.count { |r| r['flags'].include?('clamped_negative') }

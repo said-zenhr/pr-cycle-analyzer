@@ -13,6 +13,10 @@ module Aggregate
       next false if opts[:repo]     && !opts[:repo].include?(r['repo'])
       next false if opts[:author]   && !opts[:author].include?(r['author'])
       next false if opts[:team]     && !opts[:team].include?(r['team'])
+      # the only OR predicate: a person is relevant as author or as reviewer
+      if opts[:person] && !opts[:person].include?(r['author']) && (opts[:person] & r['reviewers']).empty?
+        next false
+      end
       next false if opts[:reviewer] && (opts[:reviewer] & r['reviewers']).empty?
       next false if opts[:label]    && (opts[:label] & r['labels']).empty?
       next false if opts[:base]     && !opts[:base].include?(r['base_branch'])
@@ -25,11 +29,19 @@ module Aggregate
     end
   end
 
-  # group_by: week | month | quarter | year | all | repo | author | reviewer | label
+  # group_by: week | month | quarter | year | all | repo | author | team | person | reviewer | label
   # Calendar buckets come off merged_at, so widening the window never needs a re-fetch.
   # reviewer/label fan a PR out into every one of its values.
-  def group(rows, key)
+  def group(rows, key, people = nil)
     case key
+    when 'person'
+      # one bucket per role, so the same PR can land in both
+      people.each_with_object({}) do |who, h|
+        authored = rows.select { |r| r['author'] == who }
+        reviewed = rows.select { |r| r['reviewers'].include?(who) }
+        h["#{who} — author"] = authored unless authored.empty?
+        h["#{who} — reviewer"] = reviewed unless reviewed.empty?
+      end
     when 'month'   then rows.group_by { |r| r['merged_at'][0, 7] }
     when 'quarter' then rows.group_by { |r| q(r['merged_at']) }
     when 'year'    then rows.group_by { |r| r['merged_at'][0, 4] }
@@ -45,8 +57,8 @@ module Aggregate
     end
   end
 
-  def buckets(rows, key)
-    group(rows, key).sort_by(&:first).map { |name, rs| summarize(name, rs) }
+  def buckets(rows, key, people = nil)
+    group(rows, key, people).sort_by(&:first).map { |name, rs| summarize(name, rs) }
   end
 
   def summarize(name, rows)
