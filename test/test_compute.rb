@@ -1,6 +1,7 @@
 require 'minitest/autorun'
 require 'json'
 $LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'time'
 require 'compute'
 require 'aggregate'
 
@@ -23,6 +24,26 @@ class ComputeTest < Minitest::Test
       sum = r['pickup_s'] + r['review_s'] + r['merge_wait_s']
       assert_in_delta r['total_s'], sum, 0.001, "PR #{r['number']} segments do not sum to total"
     end
+  end
+
+  # rule 2, working clock: same invariant must hold on business hours.
+  def test_business_segments_sum_to_total
+    @rows.reject { |r| r['total_bh_s'].nil? }.each do |r|
+      sum = r['pickup_bh_s'] + r['review_bh_s'] + r['merge_wait_bh_s']
+      assert_in_delta r['total_bh_s'], sum, 0.001, "PR #{r['number']} business segments do not sum"
+    end
+  end
+
+  def test_business_clock_skips_nights_and_weekends
+    # Sunday 21:00 -> Monday 12:10 Amman: 15.17h on the wall, 3.17h at work
+    assert_in_delta 3.17 * H, Compute.business_seconds(Time.parse('2026-09-06T18:00:00Z'),
+                                                       Time.parse('2026-09-07T09:10:00Z')), 60
+    # Thursday 15:00 -> Sunday 10:00 Amman: 67h on the wall, 4h at work (Fri+Sat off)
+    assert_in_delta 4 * H, Compute.business_seconds(Time.parse('2026-09-10T12:00:00Z'),
+                                                    Time.parse('2026-09-13T07:00:00Z')), 60
+    # entirely inside the weekend
+    assert_equal 0.0, Compute.business_seconds(Time.parse('2026-09-11T08:00:00Z'),
+                                               Time.parse('2026-09-12T08:00:00Z'))
   end
 
   # rule 1: anchored on ready-for-review, not creation.

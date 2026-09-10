@@ -7,6 +7,13 @@ require 'set'
 module Compute
   BOT_SUFFIX = '[bot]'.freeze
 
+  # Amman: UTC+3 year-round since 2022, no DST, so a fixed offset is correct.
+  # Work week Sunday-Thursday, 09:00-18:00. Public holidays are not modelled.
+  OFFSET = '+03:00'.freeze
+  WORK_DAYS = (0..4).freeze # Sunday..Thursday
+  DAY_START = 9
+  DAY_END = 18
+
   module_function
 
   # raw: {"repo" => "org/name", "prs" => [gh pr list nodes], "timeline" => {"123" => [events]}}
@@ -60,23 +67,27 @@ module Compute
     approved = nil if approved && first_response && approved < first_response
 
     # rule 3: broken review chain falls back so no elapsed time disappears.
-    if first_response.nil?
-      flags << 'no_review'
-      pickup, review, merge_wait = merged - ready, 0.0, 0.0
-    elsif approved.nil?
-      flags << 'no_approval'
-      pickup, review, merge_wait = first_response - ready, merged - first_response, 0.0
-    else
-      pickup     = first_response - ready
-      review     = approved - first_response
-      merge_wait = merged - approved
-    end
+    # One set of boundaries, both clocks derived from it — so the wall-clock and
+    # working-hours segments cannot drift apart.
+    spans =
+      if first_response.nil?
+        flags << 'no_review'
+        [[ready, merged], nil, nil]
+      elsif approved.nil?
+        flags << 'no_approval'
+        [[ready, first_response], [first_response, merged], nil]
+      else
+        [[ready, first_response], [first_response, approved], [approved, merged]]
+      end
 
+    pickup, review, merge_wait = spans.map { |a, b| a.nil? ? 0.0 : b - a }
     total = merged - ready
     # rule 5 fallthrough: clock skew / ready-after-merge. Clamp to nil, never emit as data.
+    bh = spans.map { |a, b| a.nil? ? 0.0 : business_seconds(a, b) }
     if [pickup, review, merge_wait, total].any? { |s| s < 0 }
       flags << 'clamped_negative'
       pickup = review = merge_wait = total = nil
+      bh = [nil, nil, nil]
     end
 
     {
@@ -95,8 +106,36 @@ module Compute
       'draft_s' => readies.empty? ? nil : (ready - created),
       'pickup_s' => pickup, 'review_s' => review, 'merge_wait_s' => merge_wait,
       'total_s' => total,
+      # Working-hours twins off the same boundaries. business_seconds is additive
+      # over adjacent spans, so these sum to total_bh_s like the wall-clock ones.
+      'draft_bh_s' => readies.empty? ? nil : business_seconds(created, ready),
+      'pickup_bh_s' => bh[0], 'review_bh_s' => bh[1], 'merge_wait_bh_s' => bh[2],
+      'total_bh_s' => total.nil? ? nil : business_seconds(ready, merged),
       'flags' => flags
     }
+  end
+
+  # Elapsed working seconds between two instants. A PR ready at 18:00 and
+  # reviewed at 09:10 next morning waits 15h on the wall and 10 minutes at work.
+  def business_seconds(from, to)
+    return nil if from.nil? || to.nil?
+    return 0.0 if to <= from
+    a = from.getlocal(OFFSET)
+    b = to.getlocal(OFFSET)
+    total = 0.0
+    day = Date.new(a.year, a.month, a.day)
+    last = Date.new(b.year, b.month, b.day)
+    while day <= last
+      if WORK_DAYS.include?(day.wday)
+        open_at  = Time.new(day.year, day.month, day.day, DAY_START, 0, 0, OFFSET)
+        close_at = Time.new(day.year, day.month, day.day, DAY_END, 0, 0, OFFSET)
+        lo = [a, open_at].max
+        hi = [b, close_at].min
+        total += hi - lo if hi > lo
+      end
+      day += 1
+    end
+    total
   end
 
   def bot?(author, deny)

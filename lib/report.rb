@@ -3,8 +3,8 @@ require 'fileutils'
 
 # ERB -> HTML, stdout summary.
 module Report
-  COLORS = { 'pickup_s' => '#d95f02', 'review_s' => '#1b9e77', 'merge_wait_s' => '#7570b3' }.freeze
-  LABELS = { 'pickup_s' => 'pickup', 'review_s' => 'review', 'merge_wait_s' => 'merge-wait' }.freeze
+  COLORS = { 'pickup_bh_s' => '#d95f02', 'review_bh_s' => '#1b9e77', 'merge_wait_bh_s' => '#7570b3' }.freeze
+  LABELS = { 'pickup_bh_s' => 'pickup', 'review_bh_s' => 'review', 'merge_wait_bh_s' => 'merge-wait' }.freeze
 
   module_function
 
@@ -17,7 +17,7 @@ module Report
   end
 
   # 256-colour ANSI, matched to the chart's segment colours. NO_COLOR or a pipe turns it off.
-  ANSI = { 'pickup_s' => 208, 'review_s' => 35, 'merge_wait_s' => 98 }.freeze
+  ANSI = { 'pickup_bh_s' => 208, 'review_bh_s' => 35, 'merge_wait_bh_s' => 98 }.freeze
   BAR = 24
 
   def color?(io)
@@ -52,9 +52,9 @@ module Report
     io.print "\n\n" # breathing room between the command line and the table
     label = group_by == 'week' ? 'week of' : group_by
     w = [buckets.map { |b| b['bucket'].to_s.length }.max || 0, label.length].max
-    fmt = ["%-#{w}s", '%4s', '%-16s', '%-16s', '%-16s', '%8s', "%-#{BAR}s", '%s'].join(SEP)
+    fmt = ["%-#{w}s", '%4s', '%-16s', '%-16s', '%-16s', '%8s', '%8s', "%-#{BAR}s", '%s'].join(SEP)
 
-    head = format(fmt, label, 'n', 'pickup', 'review', 'merge-wait', 'total', 'split', 'bottleneck')
+    head = format(fmt, label, 'n', 'pickup', 'review', 'merge-wait', 'total', 'wall', 'split', 'bottleneck')
     io.puts bold(head, io)
     io.puts rule(head, '─', io)
 
@@ -70,6 +70,7 @@ module Report
       end
       io.puts format(fmt.sub('%4s', '%4d'), b['bucket'], b['n'], *cells,
                      bold(format('%8s', h(b['total']['median'])), io),
+                     dim(format('%8s', h(b['wall']['median'])), io),
                      pad(bar(b, io), BAR),
                      fg(b['bottleneck'], ANSI.fetch("#{b['bottleneck'].tr('-', '_')}_s", 7), io))
       next if b['flagged'].zero?
@@ -79,7 +80,7 @@ module Report
 
     marks = color?(io) ? ['  ', '  ', '  '] : %w[## == ..]
     key = ANSI.values.each_with_index.map { |code, i| bg(marks[i], code, io) + ' ' + LABELS.values[i] }.join('   ')
-    io.puts "\n#{dim('median per stage, p75 beside it  ·  ', io)}#{key}"
+    io.puts "\n#{dim('working hours, Sun-Thu 09:00-18:00 Amman · wall = elapsed · p75 beside each median  ·  ', io)}#{key}"
   end
 
   # printf counts escape bytes, so pad on visible width.
@@ -103,25 +104,26 @@ module Report
     return if top.empty?
     w = top.map { |r| "#{r['repo']}##{r['number']}".length }.max
     io.puts "\n#{bold("slowest #{top.size} PRs", io)}"
-    fmt = ["%-#{w}s", '%8s', '%8s', '%8s', '%8s', '%-14s', '%-48s'].join(SEP)
-    head = format(fmt, 'pr', 'total', 'pickup', 'review', 'wait', 'author', 'title')
+    fmt = ["%-#{w}s", '%8s', '%8s', '%8s', '%8s', '%8s', '%-14s', '%-48s'].join(SEP)
+    head = format(fmt, 'pr', 'total', 'wall', 'pickup', 'review', 'wait', 'author', 'title')
     io.puts bold(head, io)
     io.puts rule(head, '─', io)
     top.each_with_index do |r, i|
       io.puts rule(head, '┈', io) if i.positive?
       io.puts format(fmt,
                      "#{r['repo']}##{r['number']}",
-                     pad(bold(format('%8s', h(r['total_s'], 0)), io), 8),
-                     pad(fg(format('%8s', h(r['pickup_s'], 0)), ANSI['pickup_s'], io), 8),
-                     pad(fg(format('%8s', h(r['review_s'], 0)), ANSI['review_s'], io), 8),
-                     pad(fg(format('%8s', h(r['merge_wait_s'], 0)), ANSI['merge_wait_s'], io), 8),
+                     pad(bold(format('%8s', h(r['total_bh_s'], 0)), io), 8),
+                     pad(dim(format('%8s', h(r['total_s'], 0)), io), 8),
+                     pad(fg(format('%8s', h(r['pickup_bh_s'], 0)), ANSI['pickup_bh_s'], io), 8),
+                     pad(fg(format('%8s', h(r['review_bh_s'], 0)), ANSI['review_bh_s'], io), 8),
+                     pad(fg(format('%8s', h(r['merge_wait_bh_s'], 0)), ANSI['merge_wait_bh_s'], io), 8),
                      r['author'].to_s[0, 14], dim(r['title'].to_s[0, 48], io))
       io.puts dim(format("%-#{w}s#{SEP}%s", '', r['flags'].join(' ')), io) unless r['flags'].empty?
     end
   end
 
   def slowest(rows, limit = 10)
-    rows.reject { |r| r['total_s'].nil? }.sort_by { |r| -r['total_s'] }.first(limit)
+    rows.reject { |r| r['total_bh_s'].nil? }.sort_by { |r| -r['total_bh_s'] }.first(limit)
   end
 
   TEMPLATE = <<~ERB
@@ -144,6 +146,8 @@ module Report
       code { font-size: 11px; color: #a33; }
     </style>
     <h1>PR cycle time by <%= group_by %></h1>
+    <p>Working hours only — Sunday to Thursday, 09:00–18:00 Amman. Nights, weekends and the wall clock are in
+    <code>data/computed/prs.json</code>.</p>
     <p class="legend">
       <% Report::COLORS.each do |seg, color| %>
         <span><i class="swatch" style="background:<%= color %>"></i><%= Report::LABELS[seg] %></span>
@@ -176,10 +180,10 @@ module Report
         <tr>
           <td><a href="<%= r['url'] %>"><%= r['repo'] %>#<%= r['number'] %></a> <%= r['title'][0, 60] %></td>
           <td><%= r['author'] %></td>
-          <td class="num"><%= Report.h(r['total_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['pickup_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['review_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['merge_wait_s'], 0) %></td>
+          <td class="num"><%= Report.h(r['total_bh_s'], 0) %></td>
+          <td class="num"><%= Report.h(r['pickup_bh_s'], 0) %></td>
+          <td class="num"><%= Report.h(r['review_bh_s'], 0) %></td>
+          <td class="num"><%= Report.h(r['merge_wait_bh_s'], 0) %></td>
           <td><code><%= r['flags'].join(' ') %></code></td>
         </tr>
       <% end %>

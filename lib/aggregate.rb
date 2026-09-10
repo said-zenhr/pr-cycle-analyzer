@@ -2,7 +2,7 @@ require 'time'
 
 # Filters, grouping, percentiles. Rows in, buckets out.
 module Aggregate
-  SEGMENTS = %w[pickup_s review_s merge_wait_s].freeze
+  SEGMENTS = %w[pickup_bh_s review_bh_s merge_wait_bh_s].freeze
   MIN_N = 10 # rule 8
 
   module_function
@@ -62,12 +62,13 @@ module Aggregate
   end
 
   def summarize(name, rows)
-    scored = rows.reject { |r| r['total_s'].nil? } # clamped rows are counted, never averaged
+    scored = rows.reject { |r| r['total_bh_s'].nil? } # clamped rows are counted, never averaged
     stats = SEGMENTS.each_with_object({}) do |seg, h|
       values = scored.map { |r| r[seg] }.compact
       h[seg] = { 'median' => percentile(values, 0.5), 'p75' => percentile(values, 0.75) }
     end
-    totals = scored.map { |r| r['total_s'] }
+    totals = scored.map { |r| r['total_bh_s'] }
+    walls = scored.map { |r| r['total_s'] }
     {
       'bucket' => name,
       'n' => scored.size,
@@ -76,7 +77,8 @@ module Aggregate
       'suppressed' => scored.size < MIN_N,
       'stages' => stats,
       'total' => { 'median' => percentile(totals, 0.5), 'p75' => percentile(totals, 0.75) },
-      'bottleneck' => stats.max_by { |_, v| v['median'] || -1 }&.first&.sub('_s', ''),
+      'wall' => { 'median' => percentile(walls, 0.5), 'p75' => percentile(walls, 0.75) },
+      'bottleneck' => stats.max_by { |_, v| v['median'] || -1 }&.first&.sub('_bh_s', ''),
       'rows' => rows
     }
   end

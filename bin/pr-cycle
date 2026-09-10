@@ -112,9 +112,14 @@ if opts[:group_by] == 'team' && teams.empty?
 end
 
 # rule 2, on the real backfill and not just fixtures.
-bad = rows.reject { |r| r['total_s'].nil? }
-          .reject { |r| ((r['pickup_s'] + r['review_s'] + r['merge_wait_s']) - r['total_s']).abs < 1 }
-abort "segments-sum-to-total violated on #{bad.size} PRs: #{bad.first(5).map { |r| r['url'] }.join(', ')}" unless bad.empty?
+%w[_s _bh_s].each do |clock|
+  bad = rows.reject { |r| r["total#{clock}"].nil? }.reject do |r|
+    segments = %w[pickup review merge_wait].sum { |seg| r["#{seg}#{clock}"] }
+    (segments - r["total#{clock}"]).abs < 1
+  end
+  next if bad.empty?
+  abort "segments-sum-to-total violated on #{bad.size} PRs (#{clock}): #{bad.first(5).map { |r| r['url'] }.join(', ')}"
+end
 
 path = File.join(ROOT, 'data/computed/prs.json')
 FileUtils.mkdir_p(File.dirname(path))

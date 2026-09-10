@@ -19,6 +19,18 @@ Anchored on **ready-for-review**, not PR creation:
 on every run, not just in the tests — a violation aborts the run rather than printing a wrong number.
 `draft` is reported separately and excluded from cycle time.
 
+### Working hours
+
+Every segment is measured twice: elapsed wall-clock, and elapsed **working** time — Sunday to Thursday,
+09:00–18:00 Asia/Amman (fixed UTC+3, no DST). Reports show working hours; the wall clock sits beside the total and
+in `data/computed/prs.json` as `pickup_s` / `review_s` / `merge_wait_s` / `total_s` next to the `_bh_s` twins.
+
+A PR ready at 18:00 and reviewed at 09:10 the next morning waits 15.2h on the wall and 10 minutes at work. A PR
+ready Thursday 15:00 and reviewed Sunday 10:00 waits 67h on the wall and 4h at work. Without this, pickup — the
+segment most exposed to overnight and weekend gaps — reads 2–3× too high.
+
+Public holidays are not modelled. Both clocks satisfy the segments-sum-to-total invariant independently.
+
 ## Usage
 
 ```bash
@@ -126,7 +138,7 @@ All of them live in `lib/compute.rb`, which is a pure function (raw JSON → row
 the tests point.
 
 1. Anchored on `ready_for_review` from the issue timeline. For PRs opened non-draft, ready == created.
-2. Segments sum to total. Asserted per PR in tests *and* on every real run.
+2. Segments sum to total, on both clocks. Asserted per PR in tests *and* on every real run.
 3. Broken review chains fall back so no elapsed time disappears: no approval → `review` runs to merge;
    no review at all → the whole span is `pickup`.
 4. Bots excluded before anything is computed. GitHub Apps often appear without an `is_bot` flag and without the
