@@ -55,8 +55,14 @@ module Compute
     reviews = (pr['reviews'] || []).reject { |r| bot?(r['author'], deny) || r.dig('author', 'login') == author }
     comments = (pr['comments'] || []).reject { |c| bot?(c['author'], deny) || c.dig('author', 'login') == author }
 
-    responses = reviews.map { |r| t(r['submittedAt']) } + comments.map { |c| t(c['createdAt']) }
-    responses = responses.compact.select { |ts| ts >= ready }
+    # Per-person first touch, so "which reviewer is the queue" is answerable.
+    # A review and a comment count the same — both are a human responding.
+    touches = reviews.map { |r| [r.dig('author', 'login'), t(r['submittedAt'])] } +
+              comments.map { |c| [c.dig('author', 'login'), t(c['createdAt'])] }
+    touches = touches.select { |login, ts| login && ts && ts >= ready }
+    by_person = touches.group_by(&:first).map { |login, ts| [login, ts.map(&:last).min] }.to_h
+
+    responses = touches.map(&:last)
 
     approvals = reviews.select { |r| r['state'] == 'APPROVED' }.map { |r| t(r['submittedAt']) }.compact
 
@@ -102,6 +108,12 @@ module Compute
       'number' => pr['number'], 'repo' => repo, 'url' => pr['url'], 'title' => pr['title'],
       'author' => author,
       'reviewers' => reviews.map { |r| r.dig('author', 'login') }.compact.uniq,
+      # login => how long that person took to respond, from ready. Their own
+      # queue time, not the PR's — the PR may have been answered by someone else.
+      'responses' => by_person.map { |login, at|
+        [login, { 's' => at - ready, 'bh_s' => business_seconds(ready, at) }]
+      }.to_h,
+      'first_responder' => by_person.min_by { |_, at| at }&.first,
       'labels' => (pr['labels'] || []).map { |l| l['name'] },
       'base_branch' => pr['baseRefName'],
       'files_changed' => pr['changedFiles'],

@@ -48,6 +48,36 @@
     font: inherit; font-size: .8rem; padding: .4rem .8rem; cursor: pointer; align-self: flex-end;
     color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
   }
+  details.ms { position: relative; }
+  details.ms > summary {
+    list-style: none; cursor: pointer; font: inherit; font-size: .875rem; padding: .35rem .5rem;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; min-width: 8.5rem;
+    display: flex; justify-content: space-between; gap: .5rem; align-items: center;
+  }
+  details.ms > summary::-webkit-details-marker { display: none; }
+  details.ms > summary::after { content: "▾"; color: var(--text-muted); font-size: .7rem; }
+  details.ms[open] > summary { border-color: var(--text-muted); }
+  .ms-list {
+    position: absolute; z-index: 20; top: 100%; left: 0; margin-top: 4px; min-width: 100%; max-height: 16rem;
+    overflow-y: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: .35rem;
+  }
+  .ms-list label {
+    display: flex; gap: .45rem; align-items: center; padding: .25rem .4rem; border-radius: 5px;
+    font-size: .85rem; text-transform: none; letter-spacing: 0; color: var(--text-primary); white-space: nowrap;
+  }
+  .ms-list label:hover { background: var(--surface-2); }
+  .ms-list input { min-width: 0; margin: 0; }
+  .panel {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: .9rem 1.1rem; margin-bottom: 2rem;
+  }
+  .panel ul { margin: 0; padding-left: 1.1rem; }
+  .panel li { margin: .3rem 0; font-size: .875rem; color: var(--text-secondary); }
+  .panel li b { color: var(--text-primary); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 1.75rem; }
+  .bar-cell { display: flex; align-items: center; gap: .5rem; }
+  .bar-cell span { height: 8px; border-radius: 2px; display: inline-block; }
   .tiles { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.75rem; }
   .tile { flex: 1 1 8rem; padding: .85rem 1rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
   .tile .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
@@ -95,6 +125,20 @@
   </div>
   <div class="chartbox"><svg id="chart" role="img" aria-label="Median hours per stage"></svg></div>
 
+  <h2>What is slow, and why</h2>
+  <div class="panel"><ul id="why"></ul></div>
+
+  <div class="cols">
+    <div>
+      <h2>Reviewers — time to first response</h2>
+      <table id="reviewers"></table>
+    </div>
+    <div>
+      <h2>Teams</h2>
+      <table id="teams"></table>
+    </div>
+  </div>
+
   <h2>Per bucket</h2>
   <table id="buckets"></table>
 
@@ -104,10 +148,12 @@
 <div class="tt" id="tt"></div>
 
 <script id="rows" type="application/json"><%= rows_json %></script>
+<script id="teams-map" type="application/json"><%= teams_json %></script>
 <script>
 const ROWS = JSON.parse(document.getElementById('rows').textContent);
 const STAGES = [['pickup', 'pickup'], ['review', 'review'], ['merge_wait', 'merge-wait']];
 const MIN_N = 10;
+const MIN_REVIEWS = 5; // below this a reviewer median is noise, not a ranking
 const F = {}; // active filter state
 
 const uniq = (key) => [...new Set(ROWS.flatMap(r => Array.isArray(r[key]) ? r[key] : [r[key]]))]
@@ -126,12 +172,12 @@ const suffix = () => F.clock === 'wall' ? '_s' : '_bh_s';
 
 function filtered() {
   return ROWS.filter(r => {
-    if (F.repo && r.repo !== F.repo) return false;
-    if (F.team && r.team !== F.team) return false;
-    if (F.author && r.author !== F.author) return false;
-    if (F.reviewer && !r.reviewers.includes(F.reviewer)) return false;
-    if (F.label && !r.labels.includes(F.label)) return false;
-    if (F.base && r.base_branch !== F.base) return false;
+    if (F.repo.size && !F.repo.has(r.repo)) return false;
+    if (F.team.size && !F.team.has(r.team)) return false;
+    if (F.author.size && !F.author.has(r.author)) return false;
+    if (F.reviewer.size && !r.reviewers.some(v => F.reviewer.has(v))) return false;
+    if (F.label.size && !r.labels.some(v => F.label.has(v))) return false;
+    if (F.base.size && !F.base.has(r.base_branch)) return false;
     if (F.since && r.merged_at < F.since) return false;
     if (F.until && r.merged_at > F.until + 'T23:59:59Z') return false;
     if (F.min_size && r.lines_changed < +F.min_size) return false;
@@ -203,13 +249,34 @@ function buildFilters() {
     return field(labelText, s);
   };
 
+  // multi-select: native details + checkboxes, no library, keyboard reachable
+  const multi = (name, values, labelText) => {
+    F[name] = new Set();
+    const d = document.createElement('details'); d.className = 'ms';
+    const sum = document.createElement('summary'); sum.textContent = 'all';
+    const list = document.createElement('div'); list.className = 'ms-list';
+    values.forEach(v => {
+      const l = document.createElement('label');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = v;
+      cb.onchange = () => {
+        cb.checked ? F[name].add(v) : F[name].delete(v);
+        sum.textContent = F[name].size === 0 ? 'all'
+          : F[name].size === 1 ? [...F[name]][0] : F[name].size + ' selected';
+        render();
+      };
+      l.append(cb, document.createTextNode(v));
+      list.append(l);
+    });
+    d.append(sum, list);
+    document.addEventListener('click', e => { if (!d.contains(e.target)) d.open = false; });
+    return field(labelText, d);
+  };
+
   select('group', [['week', 'week'], ['month', 'month'], ['quarter', 'quarter'], ['year', 'year'],
                    ['all', 'all time'], ['repo', 'repo'], ['team', 'team'], ['author', 'author'],
                    ['reviewer', 'reviewer'], ['label', 'label']], 'group by', 'week');
   select('clock', [['bh', 'working hours'], ['wall', 'elapsed']], 'clock', 'bh');
-  for (const [name, key, labelText] of FIELDS) {
-    select(name, [['', 'all']].concat(uniq(key).map(v => [v, v])), labelText, '');
-  }
+  for (const [name, key, labelText] of FIELDS) multi(name, uniq(key), labelText);
   for (const [name, labelText] of [['since', 'merged from'], ['until', 'merged to']]) {
     const i = document.createElement('input'); i.type = 'date';
     i.onchange = () => { F[name] = i.value; render(); };
@@ -347,6 +414,165 @@ function drawTiles(rows, buckets) {
     .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 }
 
+/* ---------- rankings ---------- */
+const TEAM_OF = JSON.parse(document.getElementById('teams-map').textContent);
+
+// One entry per person: how long THEY took to answer, not how long the PR waited.
+function reviewerStats(rows) {
+  const sfx = F.clock === 'wall' ? 's' : 'bh_s';
+  const acc = new Map();
+  for (const r of rows) {
+    for (const [login, v] of Object.entries(r.responses)) {
+      if (!acc.has(login)) acc.set(login, { login, times: [], first: 0, prs: 0 });
+      const a = acc.get(login);
+      a.times.push(v[sfx]);
+      a.prs++;
+      if (r.first_responder === login) a.first++;
+    }
+  }
+  return [...acc.values()].map(a => ({
+    ...a, median: percentile(a.times, 0.5), p75: percentile(a.times, 0.75),
+    team: TEAM_OF[a.login] || '(no team)'
+  }));
+}
+
+function teamStats(rows) {
+  const sfx = suffix();
+  const acc = new Map();
+  const get = t => {
+    if (!acc.has(t)) acc.set(t, { team: t, authored: [], reviewed: [] });
+    return acc.get(t);
+  };
+  for (const r of rows) {
+    if (r['total' + sfx] !== null) get(r.team).authored.push(r['total' + sfx]);
+    const seen = new Set();
+    for (const [login, v] of Object.entries(r.responses)) {
+      const t = TEAM_OF[login] || '(no team)';
+      if (seen.has(t)) continue;
+      seen.add(t);
+      get(t).reviewed.push(v[F.clock === 'wall' ? 's' : 'bh_s']);
+    }
+  }
+  return [...acc.values()].map(a => ({
+    ...a, cycle: percentile(a.authored, 0.5), response: percentile(a.reviewed, 0.5)
+  }));
+}
+
+function rankTable(id, head, rowsHtml) {
+  document.getElementById(id).innerHTML = head + rowsHtml;
+}
+
+function drawReviewers(rows) {
+  const all = reviewerStats(rows).sort((a, b) => b.median - a.median);
+  const stats = all.filter(s => s.prs >= MIN_REVIEWS);
+  const thin = all.filter(s => s.prs < MIN_REVIEWS);
+  if (!stats.length) {
+    rankTable('reviewers', '', `<tr><td class="flag">no reviewer answered ${MIN_REVIEWS}+ PRs here</td></tr>`);
+    return;
+  }
+  const max = Math.max(...stats.map(s => s.median), 1);
+  const head = `<tr><th>reviewer</th><th class="num">PRs</th><th class="num">median</th>` +
+               `<th class="num">p75</th><th>relative</th><th class="num">first in</th></tr>`;
+  const body = stats.map(s =>
+    `<tr><td>${s.login}<div class="flag">${s.team}</div></td><td class="num">${s.prs}</td>` +
+    `<td class="num">${hours(s.median)}</td><td class="num flag">${hours(s.p75, 0)}</td>` +
+    `<td><div class="bar-cell"><span style="width:${Math.max(2, s.median / max * 90)}px;background:var(--pickup)"></span></div></td>` +
+    `<td class="num">${s.first}</td></tr>`).join('');
+  const note = thin.length
+    ? `<tr><td colspan="6" class="flag">${thin.length} reviewers hidden — under ${MIN_REVIEWS} PRs, too few to rank</td></tr>`
+    : '';
+  rankTable('reviewers', head, body + note);
+}
+
+function drawTeams(rows) {
+  const stats = teamStats(rows).sort((a, b) => (b.response ?? -1) - (a.response ?? -1));
+  const head = `<tr><th>team</th><th class="num">PRs</th><th class="num">cycle</th>` +
+               `<th class="num">reviews in</th></tr>`;
+  const body = stats.map(t =>
+    `<tr><td>${t.team}</td><td class="num">${t.authored.length}</td>` +
+    `<td class="num">${t.authored.length >= MIN_N ? hours(t.cycle) : '<span class="flag">n&lt;' + MIN_N + '</span>'}</td>` +
+    `<td class="num">${t.reviewed.length >= 3 ? hours(t.response) : '<span class="flag">—</span>'}</td></tr>`).join('');
+  rankTable('teams', head, body);
+}
+
+/* ---------- diagnostics ---------- */
+function drawWhy(rows) {
+  const sfx = suffix();
+  const scored = rows.filter(r => r['total' + sfx] !== null);
+  const out = [];
+  const say = (h) => out.push(`<li>${h}</li>`);
+  const med = (vals) => percentile(vals.filter(v => v !== null), 0.5);
+
+  if (scored.length) {
+    // 1. which stage, and how much of the whole it holds
+    const totals = {};
+    for (const [k, l] of STAGES) totals[l] = scored.reduce((a, r) => a + (r[k + sfx] || 0), 0);
+    const sum = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
+    const worst = Object.entries(totals).sort((a, b) => b[1] - a[1])[0];
+    say(`<b>${worst[0]}</b> holds <b>${(worst[1] / sum * 100).toFixed(0)}%</b> of all waiting time ` +
+        `(${Object.entries(totals).map(([l, v]) => `${l} ${(v / sum * 100).toFixed(0)}%`).join(' · ')}).`);
+
+    // 2. tail or systemic
+    const sorted = scored.map(r => r['total' + sfx]).sort((a, b) => b - a);
+    const topN = Math.max(1, Math.round(sorted.length * 0.2));
+    const tail = sorted.slice(0, topN).reduce((a, b) => a + b, 0) / (sorted.reduce((a, b) => a + b, 0) || 1);
+    say(tail > 0.6
+      ? `Tail-driven: the slowest <b>${topN}</b> PRs hold <b>${(tail * 100).toFixed(0)}%</b> of the waiting. Fix those PRs, not the process.`
+      : `Systemic: the slowest <b>${topN}</b> PRs hold only <b>${(tail * 100).toFixed(0)}%</b> of the waiting. It is spread across the whole set.`);
+
+    // 3. off-hours share
+    const wall = med(scored.map(r => r.total_s)), work = med(scored.map(r => r.total_bh_s));
+    if (wall && work) {
+      say(`<b>${(100 - work / wall * 100).toFixed(0)}%</b> of elapsed time is outside working hours ` +
+          `(median ${hours(wall, 0)} elapsed vs ${hours(work)} at work).`);
+    }
+
+    // 4. does size explain it
+    const sizes = scored.map(r => r.lines_changed).sort((a, b) => a - b);
+    const cut = sizes[Math.floor(sizes.length / 2)];
+    const big = med(scored.filter(r => r.lines_changed > cut).map(r => r['total' + sfx]));
+    const small = med(scored.filter(r => r.lines_changed <= cut).map(r => r['total' + sfx]));
+    if (big && small) {
+      const ratio = big / small;
+      say(ratio >= 1.5
+        ? `Size matters: PRs over <b>${cut}</b> lines take <b>${ratio.toFixed(1)}×</b> longer (${hours(big)} vs ${hours(small)}).`
+        : `Size is not the driver: over <b>${cut}</b> lines is only ${ratio.toFixed(1)}× (${hours(big)} vs ${hours(small)}).`);
+    }
+
+    // 5. when a PR goes ready — only worth saying when it actually differs
+    const isLate = r => (+r.ready_at.slice(11, 13) + 3) % 24 >= 15;
+    const late = scored.filter(isLate), early = scored.filter(r => !isLate(r));
+    if (late.length >= 5 && early.length >= 5) {
+      const l = med(late.map(r => r['pickup' + sfx])), e = med(early.map(r => r['pickup' + sfx]));
+      if (l && e) {
+        const ratio = l / e;
+        say(ratio >= 1.3 || ratio <= 0.77
+          ? `Ready after 15:00 Amman waits <b>${ratio.toFixed(1)}×</b> ${ratio >= 1 ? 'longer' : 'less'} for pickup ` +
+            `(${hours(l)} vs ${hours(e)}, ${late.length} of ${scored.length} PRs).`
+          : `Time of day is not a driver: pickup ${hours(l)} after 15:00 vs ${hours(e)} before.`);
+      }
+    }
+  }
+
+  // 6. who the queue is
+  const rev = reviewerStats(rows).filter(s => s.prs >= MIN_REVIEWS).sort((a, b) => b.median - a.median);
+  if (rev.length >= 2) {
+    const slow = rev[0], fast = rev[rev.length - 1];
+    say(`Slowest to respond: <b>${slow.login}</b> (${slow.team}) ${hours(slow.median)} over ${slow.prs} PRs. ` +
+        `Fastest: <b>${fast.login}</b> (${fast.team}) ${hours(fast.median)} over ${fast.prs}. ` +
+        `<span class="flag">${MIN_REVIEWS}+ PRs each</span>`);
+  }
+
+  // 7. review coverage
+  const noReview = rows.filter(r => r.flags.includes('no_review')).length;
+  const noApproval = rows.filter(r => r.flags.includes('no_approval')).length;
+  if (noReview || noApproval) {
+    say(`<b>${noReview}</b> merged with no human response at all, <b>${noApproval}</b> with a response but no approval.`);
+  }
+
+  document.getElementById('why').innerHTML = out.join('') || '<li>Not enough data for these filters.</li>';
+}
+
 function render() {
   const rows = filtered();
   if (!rows.length) {
@@ -354,6 +580,9 @@ function render() {
     document.getElementById('chart').replaceChildren();
     document.getElementById('buckets').innerHTML = '';
     document.getElementById('slowest').innerHTML = '';
+    document.getElementById('why').innerHTML = '<li>No PRs match these filters.</li>';
+    document.getElementById('reviewers').innerHTML = '';
+    document.getElementById('teams').innerHTML = '';
     return;
   }
   const buckets = group(rows).map(([name, rs]) => summarize(name, rs));
@@ -361,6 +590,9 @@ function render() {
   drawChart(buckets);
   drawBuckets(buckets);
   drawSlowest(rows);
+  drawWhy(rows);
+  drawReviewers(rows);
+  drawTeams(rows);
 }
 
 buildFilters();

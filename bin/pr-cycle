@@ -137,4 +137,4 @@ Report.slowest_table(filtered) unless opts[:no_table]
 clamped = filtered.count { |r| r['flags'].include?('clamped_negative') }
 warn "#{clamped} PRs clamped (negative durations, excluded from aggregates)" if clamped.positive?
 warn "rows -> #{path}"
-warn "dashboard -> #{Report.html(buckets, rows, opts[:group_by], opts[:out])}"
+warn "dashboard -> #{Report.html(buckets, rows, opts[:group_by], opts[:out], of_team)}"

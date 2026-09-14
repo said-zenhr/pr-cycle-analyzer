@@ -45,9 +45,19 @@ can change without re-fetching. Computed rows land in `data/computed/prs.json`, 
 ## Dashboard
 
 Every run writes `data/computed/dashboard.html` — one self-contained file with the rows embedded. Open it in a
-browser, no server and no install. Dropdowns for group-by, working-hours vs elapsed, repo, team, author, reviewer,
-label, base branch, merge date range and PR size; everything recomputes client-side. Stacked bars with hover
+browser, no server and no install. Dropdowns for group-by and clock; multi-select for repo, team, author, reviewer, label and base branch; date range
+and PR size. Everything recomputes client-side. Stacked bars with hover
 detail, a per-bucket table, and the slowest ten PRs with links.
+
+**Diagnostics.** A "what is slow, and why" panel recomputes on every filter change: which stage holds the most
+waiting time, whether it is tail-driven or systemic, how much of the elapsed time is outside working hours, whether
+PR size explains it, whether time-of-day does, the slowest and fastest responders, and how many PRs merged with no
+human response.
+
+**Rankings.** Reviewers ranked by their *own* time to first response — from ready to that person's first review or
+comment — not the PR's pickup, which belongs to whoever answered first. A `first in` column counts how often they
+were that person. Teams are ranked both ways: median cycle time on PRs they author, and median response time on
+PRs they review. Reviewers under 5 PRs are hidden rather than ranked on noise.
 
 Send the file to anyone — it is a single file and it works offline. It is a snapshot as of the last `sync`, and
 the header says when that was. Light and dark follow the reader's system theme.

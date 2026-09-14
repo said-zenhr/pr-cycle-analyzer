@@ -128,8 +128,9 @@ module Report
     rows.reject { |r| r['total_bh_s'].nil? }.sort_by { |r| -r['total_bh_s'] }.first(limit)
   end
 
-  def html(_buckets, rows, _group_by, path)
+  def html(_buckets, rows, _group_by, path, team_of = {})
     rows_json = JSON.generate(rows)
+    teams_json = JSON.generate(team_of)
     generated = Time.now.strftime('%Y-%m-%d %H:%M')
     template = File.read(File.expand_path('dashboard.html.erb', __dir__))
     FileUtils.mkdir_p(File.dirname(path))
