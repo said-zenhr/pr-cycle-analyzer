@@ -6,13 +6,7 @@ repos:
 ignore:
   zenhr/zenhr: []
 
-# Extra bot logins. Anything ending in [bot], or with is_bot set, is already excluded.
-bots:
-  # GitHub Apps show up here without the [bot] suffix and without is_bot, so name them.
-  - coderabbitai
-  - github-actions
-  - copilot-pull-request-reviewer
-  - dependabot
-  - renovate
-  - codecov
-  - sonarcloud
+# Extra bot logins, on top of Compute::NEVER_HUMAN. Anything ending in [bot], or
+# with is_bot set, is already excluded. coderabbitai and github-actions are in
+# NEVER_HUMAN and cannot be switched off from here.
+bots: []

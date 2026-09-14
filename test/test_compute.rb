@@ -10,7 +10,7 @@ H = 3600.0
 class ComputeTest < Minitest::Test
   def setup
     raw = JSON.parse(File.read(File.expand_path('fixtures/raw.json', __dir__)))
-    @rows = Compute.rows(raw, bot_denylist: %w[dependabot], ignore: [9])
+    @rows = Compute.rows(raw, ignore: [9]) # dependabot comes from NEVER_HUMAN, not config
     @by_number = @rows.each_with_object({}) { |r, h| h[r['number']] = r }
   end
 
@@ -77,6 +77,14 @@ class ComputeTest < Minitest::Test
     assert_equal 4 * H, r['pickup_s']
     assert_equal 6 * H, r['review_s']
     assert_equal 0.0, r['merge_wait_s']
+  end
+
+  # rule 4: no flag and no config can let these count as a human response
+  def test_coderabbit_is_never_a_response
+    assert_includes Compute::NEVER_HUMAN, 'coderabbitai'
+    assert Compute.bot?({ 'login' => 'coderabbitai' }, Set.new)
+    assert Compute.bot?({ 'login' => 'github-actions' }, Set.new)
+    refute Compute.bot?({ 'login' => 'diyaa-zen' }, Set.new)
   end
 
   # rule 4

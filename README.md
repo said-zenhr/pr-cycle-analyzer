@@ -69,7 +69,6 @@ the header says when that was. Light and dark follow the reader's system theme.
 | `--all` | no time window: fetch every merged PR, report everything on disk |
 | `--group-by` | `week` (default), `month`, `quarter`, `year`, `all`, `repo`, `author`, `team`, `person`, `reviewer`, `label` |
 | `--limit` | PRs fetched per repo (default 500, `0` for no cap) |
-| `--no-exclude-bots` | bot filtering is on by default |
 | `--out` | HTML output path |
 | `--no-table` | skip the slowest-PR table on stdout |
 
@@ -151,8 +150,11 @@ the tests point.
 2. Segments sum to total, on both clocks. Asserted per PR in tests *and* on every real run.
 3. Broken review chains fall back so no elapsed time disappears: no approval → `review` runs to merge;
    no review at all → the whole span is `pickup`.
-4. Bots excluded before anything is computed. GitHub Apps often appear without an `is_bot` flag and without the
-   `[bot]` suffix (`coderabbitai`, `github-actions`), so `config/ignore.yml` carries an explicit deny-list.
+4. Bots excluded before anything is computed, and it cannot be switched off. GitHub Apps appear without an
+   `is_bot` flag and without the `[bot]` suffix, so `Compute::NEVER_HUMAN` names them — `coderabbitai`,
+   `github-actions`, `copilot`, `dependabot`, `renovate`, `codecov`, `sonarcloud`. `config/ignore.yml` can add
+   more, never remove these. coderabbitai answers within two minutes of a PR going ready; counting it as a
+   response reports pickup as 0.0h for the whole repo.
 5. Events after merge (approval-after-merge, post-close review) are dropped rather than allowed to go negative.
    Genuinely impossible spans (clock skew) clamp to `nil`, are flagged `clamped_negative`, counted, and reported.
 6. `nil` means not applicable and is excluded from aggregates. `0` means a genuine zero. Never conflated.

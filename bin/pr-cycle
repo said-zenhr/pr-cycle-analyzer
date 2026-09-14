@@ -12,7 +12,7 @@ require 'aggregate'
 require 'report'
 
 ROOT = File.expand_path('..', __dir__)
-opts = { group_by: 'week', limit: 500, exclude_bots: true,
+opts = { group_by: 'week', limit: 500,
          out: File.join(ROOT, 'data/computed/dashboard.html'),
          data_dir: File.join(ROOT, 'data') }
 
@@ -37,7 +37,6 @@ parser = OptionParser.new do |o|
   o.on('--until DATE') { |v| opts[:until] = Time.parse(v).utc }
   o.on('--days N', Integer, 'window in days; sync defaults to 90, report to everything persisted') { |v| opts[:days] = v }
   o.on('--all', 'no time window: sync every merged PR, report everything persisted') { opts[:all] = true }
-  o.on('--[no-]exclude-bots', 'default: on') { |v| opts[:exclude_bots] = v }
   o.on('--group-by KEY', %w[week month quarter year all repo author team person reviewer label],
        'week (default), month, quarter, year, all, repo, author, team, person, reviewer, label') { |v| opts[:group_by] = v }
   o.on('--limit N', Integer, 'PRs per repo to fetch (default 500, 0 = no cap)') { |v| opts[:limit] = v }
@@ -57,7 +56,7 @@ opts[:limit] = 100_000 if opts[:limit].zero? || opts[:all] # effectively uncappe
 
 config = File.join(ROOT, 'config/ignore.yml')
 ignore_cfg = File.exist?(config) ? (YAML.load_file(config) || {}) : {}
-bots = opts[:exclude_bots] ? (ignore_cfg['bots'] || []) : []
+bots = ignore_cfg['bots'] || [] # added to Compute::NEVER_HUMAN, which always applies
 
 teams_path = File.join(ROOT, 'config/teams.yml')
 

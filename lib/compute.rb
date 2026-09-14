@@ -7,6 +7,14 @@ require 'set'
 module Compute
   BOT_SUFFIX = '[bot]'.freeze
 
+  # Not human, ever. These answer within minutes of a PR going ready, so leaving
+  # any of them in reports pickup as ~0 for every PR in the repo. Structural, not
+  # configurable — config/ignore.yml only adds to this.
+  NEVER_HUMAN = %w[coderabbitai github-actions copilot copilot-pull-request-reviewer
+                   dependabot renovate codecov sonarcloud].freeze
+  # BOT_SUFFIX catches the [bot] form; NEVER_HUMAN catches the GitHub App logins
+  # that arrive without it.
+
   # Amman: UTC+3 year-round since 2022, no DST, so a fixed offset is correct.
   # Work week Sunday-Thursday, 09:00-18:00. Public holidays are not modelled.
   OFFSET = '+03:00'.freeze
@@ -140,8 +148,9 @@ module Compute
 
   def bot?(author, deny)
     return true if author.nil?
-    login = author['login'].to_s
-    author['is_bot'] || login.end_with?(BOT_SUFFIX) || deny.include?(login.downcase)
+    login = author['login'].to_s.downcase
+    author['is_bot'] || login.end_with?(BOT_SUFFIX) ||
+      NEVER_HUMAN.include?(login) || deny.include?(login)
   end
 
   def t(s)
