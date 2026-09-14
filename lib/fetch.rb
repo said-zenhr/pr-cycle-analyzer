@@ -18,6 +18,9 @@ module Fetch
           pageInfo { hasNextPage endCursor }
           nodes {
             number
+            reviews(first:100) {
+              nodes { author { login } state submittedAt comments { totalCount } }
+            }
             timelineItems(first:100, itemTypes:[READY_FOR_REVIEW_EVENT,
                           CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT,
                           HEAD_REF_FORCE_PUSHED_EVENT]) {
@@ -79,6 +82,9 @@ module Fetch
   end
 
   # Pages GraphQL until every wanted PR number is covered or pages run out.
+  # Returns [timeline events, review comment counts] per PR number. Inline review
+  # comments are the only place real review discussion lives — `gh pr list` returns
+  # a review body, which is empty on 99% of reviews.
   def timelines(owner, name, wanted)
     wanted = wanted.to_a
     remaining = wanted.dup
@@ -90,7 +96,8 @@ module Fetch
       page = gh(*args).dig('data', 'repository', 'pullRequests')
       page['nodes'].each do |node|
         next unless wanted.include?(node['number'])
-        out[node['number'].to_s] = node.dig('timelineItems', 'nodes')
+        out[node['number'].to_s] = { 'events' => node.dig('timelineItems', 'nodes'),
+                                     'reviews' => node.dig('reviews', 'nodes') }
         remaining.delete(node['number'])
       end
       break if remaining.empty? || !page.dig('pageInfo', 'hasNextPage')

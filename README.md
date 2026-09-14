@@ -54,10 +54,26 @@ waiting time, whether it is tail-driven or systemic, how much of the elapsed tim
 PR size explains it, whether time-of-day does, the slowest and fastest responders, and how many PRs merged with no
 human response.
 
-**Rankings.** Reviewers ranked by their *own* time to first response — from ready to that person's first review or
-comment — not the PR's pickup, which belongs to whoever answered first. A `first in` column counts how often they
-were that person. Teams are ranked both ways: median cycle time on PRs they author, and median response time on
-PRs they review. Reviewers under 5 PRs are hidden rather than ranked on noise.
+**Engineers.** One row per person who authored or touched a PR in the current filter — click any column to sort.
+
+| Column | Means |
+|---|---|
+| `PRs` / `lines` | volume authored |
+| `own cycle` | median cycle time of the PRs they wrote |
+| `reviewed` | PRs they responded on |
+| `responds in` | median time from ready to *their* first touch — their queue, not the PR's pickup |
+| `first in` | how often they were the first human to respond |
+| `comments` | inline review comments plus PR conversation comments |
+| `per PR` | comments ÷ PRs touched |
+| `silent` | reviews submitted without writing a single word, and what share of their reviews that is |
+
+Comment counts come from GraphQL, not `gh pr list`: only 13 of 1007 reviews in a 200-PR sample had a body, because
+review discussion lives in inline threads that `gh pr list --json reviews` does not return.
+
+A high silent count is a fact, not a verdict — a one-line PR approved without comment is fine, and pairing happens
+off GitHub. It is there to find rubber-stamping, which needs a human to confirm.
+
+**Teams** are ranked both ways: median cycle time on PRs they author, and median response time on PRs they review.
 
 Send the file to anyone — it is a single file and it works offline. It is a snapshot as of the last `sync`, and
 the header says when that was. Light and dark follow the reader's system theme.

@@ -35,11 +35,15 @@ module Compute
     raw['prs'].map do |pr|
       next if pr['mergedAt'].nil?           # rule 7: open/closed-unmerged excluded
       next if ignore.include?(pr['number']) # rule 9
-      row(repo, pr, events[pr['number'].to_s] || [], deny)
+      row(repo, pr, events[pr['number'].to_s] || {}, deny)
     end.compact
   end
 
-  def row(repo, pr, timeline, deny)
+  def row(repo, pr, extra, deny)
+    # tolerate the pre-GraphQL-reviews raw shape, which was a bare event array
+    extra = { 'events' => extra } if extra.is_a?(Array)
+    timeline = extra['events'] || []
+    graph_reviews = (extra['reviews'] || []).reject { |r| bot?(r['author'], deny) }
     author  = pr.dig('author', 'login')
     created = t(pr['createdAt'])
     merged  = t(pr['mergedAt'])
@@ -54,6 +58,12 @@ module Compute
     # rule 4: bots (and the author's own noise) never count as a response
     reviews = (pr['reviews'] || []).reject { |r| bot?(r['author'], deny) || r.dig('author', 'login') == author }
     comments = (pr['comments'] || []).reject { |c| bot?(c['author'], deny) || c.dig('author', 'login') == author }
+
+      # Inline review comments per person, from GraphQL. Nil when the raw predates it.
+    inline = graph_reviews.each_with_object(Hash.new(0)) do |r, h|
+      h[r.dig('author', 'login')] += r.dig('comments', 'totalCount').to_i
+    end
+    submitted = graph_reviews.group_by { |r| r.dig('author', 'login') }
 
     # Per-person first touch, so "which reviewer is the queue" is answerable.
     # A review and a comment count the same — both are a human responding.
@@ -111,7 +121,18 @@ module Compute
       # login => how long that person took to respond, from ready. Their own
       # queue time, not the PR's — the PR may have been answered by someone else.
       'responses' => by_person.map { |login, at|
-        [login, { 's' => at - ready, 'bh_s' => business_seconds(ready, at) }]
+        issue_comments = comments.count { |c| c.dig('author', 'login') == login }
+        review_comments = inline[login]
+        states = (submitted[login] || []).map { |r| r['state'] }
+        [login, {
+          's' => at - ready, 'bh_s' => business_seconds(ready, at),
+          # inline review comments plus PR conversation comments
+          'comments' => review_comments + issue_comments,
+          'reviewed' => !states.empty?,
+          'approved' => states.include?('APPROVED'),
+          # approved or reviewed without writing a single word on this PR
+          'silent' => !states.empty? && (review_comments + issue_comments).zero?
+        }]
       }.to_h,
       'first_responder' => by_person.min_by { |_, at| at }&.first,
       'labels' => (pr['labels'] || []).map { |l| l['name'] },

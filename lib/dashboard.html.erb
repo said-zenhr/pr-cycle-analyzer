@@ -75,6 +75,9 @@
   .panel ul { margin: 0; padding-left: 1.1rem; }
   .panel li { margin: .3rem 0; font-size: .875rem; color: var(--text-secondary); }
   .panel li b { color: var(--text-primary); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text-primary); }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 1.75rem; }
   .bar-cell { display: flex; align-items: center; gap: .5rem; }
   .bar-cell span { height: 8px; border-radius: 2px; display: inline-block; }
@@ -128,16 +131,11 @@
   <h2>What is slow, and why</h2>
   <div class="panel"><ul id="why"></ul></div>
 
-  <div class="cols">
-    <div>
-      <h2>Reviewers — time to first response</h2>
-      <table id="reviewers"></table>
-    </div>
-    <div>
-      <h2>Teams</h2>
-      <table id="teams"></table>
-    </div>
-  </div>
+  <h2>Engineers <span class="flag">— click any column to sort</span></h2>
+  <div class="scroll"><table id="engineers"></table></div>
+
+  <h2>Teams</h2>
+  <table id="teams"></table>
 
   <h2>Per bucket</h2>
   <table id="buckets"></table>
@@ -417,23 +415,94 @@ function drawTiles(rows, buckets) {
 /* ---------- rankings ---------- */
 const TEAM_OF = JSON.parse(document.getElementById('teams-map').textContent);
 
-// One entry per person: how long THEY took to answer, not how long the PR waited.
-function reviewerStats(rows) {
+// One row per engineer — everyone who authored or touched a PR in the current filter.
+// Response time is THEIR time to first touch, not the PR's pickup, which belongs to
+// whoever answered first.
+function engineerStats(rows) {
   const sfx = F.clock === 'wall' ? 's' : 'bh_s';
   const acc = new Map();
+  const get = login => {
+    if (!acc.has(login)) {
+      acc.set(login, {
+        login, team: TEAM_OF[login] || '(no team)',
+        authored: 0, lines: 0, cycles: [],
+        reviewed: 0, touched: 0, first: 0, times: [], comments: 0, silent: 0
+      });
+    }
+    return acc.get(login);
+  };
   for (const r of rows) {
+    const a = get(r.author);
+    a.authored++;
+    a.lines += r.lines_changed || 0;
+    if (r['total' + (F.clock === 'wall' ? '_s' : '_bh_s')] !== null) {
+      a.cycles.push(r['total' + (F.clock === 'wall' ? '_s' : '_bh_s')]);
+    }
     for (const [login, v] of Object.entries(r.responses)) {
-      if (!acc.has(login)) acc.set(login, { login, times: [], first: 0, prs: 0 });
-      const a = acc.get(login);
-      a.times.push(v[sfx]);
-      a.prs++;
-      if (r.first_responder === login) a.first++;
+      const e = get(login);
+      e.touched++;
+      e.times.push(v[sfx]);
+      e.comments += v.comments || 0;
+      if (v.reviewed) e.reviewed++;
+      if (v.silent) e.silent++;
+      if (r.first_responder === login) e.first++;
     }
   }
-  return [...acc.values()].map(a => ({
-    ...a, median: percentile(a.times, 0.5), p75: percentile(a.times, 0.75),
-    team: TEAM_OF[a.login] || '(no team)'
+  return [...acc.values()].map(e => ({
+    ...e,
+    median: e.times.length ? percentile(e.times, 0.5) : null,
+    cycle: e.cycles.length ? percentile(e.cycles, 0.5) : null,
+    ratio: e.touched ? e.comments / e.touched : null,
+    silentPct: e.reviewed ? e.silent / e.reviewed : null
   }));
+}
+
+const ENG_COLS = [
+  { key: 'login', label: 'engineer', dir: 1, cell: e => `${e.login}<div class="flag">${e.team}</div>` },
+  { key: 'authored', label: 'PRs', num: true, cell: e => e.authored },
+  { key: 'lines', label: 'lines', num: true, cell: e => e.lines.toLocaleString() },
+  { key: 'cycle', label: 'own cycle', num: true, cell: e => e.authored >= 3 ? hours(e.cycle) : '<span class="flag">—</span>' },
+  { key: 'touched', label: 'reviewed', num: true, cell: e => e.touched },
+  { key: 'median', label: 'responds in', num: true,
+    cell: e => e.touched >= MIN_REVIEWS ? hours(e.median) : `<span class="flag">${hours(e.median)}</span>` },
+  { key: 'first', label: 'first in', num: true, cell: e => e.first },
+  { key: 'comments', label: 'comments', num: true, cell: e => e.comments },
+  { key: 'ratio', label: 'per PR', num: true, cell: e => e.ratio === null ? '—' : e.ratio.toFixed(2) },
+  { key: 'silent', label: 'silent', num: true,
+    cell: e => !e.reviewed ? '<span class="flag">—</span>'
+      : `${e.silent}<span class="flag"> / ${(e.silentPct * 100).toFixed(0)}%</span>` }
+];
+
+let ENG_SORT = { key: 'touched', dir: -1 };
+
+function drawEngineers(rows) {
+  const stats = engineerStats(rows);
+  const { key, dir } = ENG_SORT;
+  stats.sort((x, y) => {
+    const a = x[key], b = y[key];
+    if (a === null || a === undefined) return 1;
+    if (b === null || b === undefined) return -1;
+    return typeof a === 'string' ? a.localeCompare(b) * dir : (a - b) * dir;
+  });
+  const head = '<tr>' + ENG_COLS.map(c =>
+    `<th class="${c.num ? 'num ' : ''}sortable" data-key="${c.key}">${c.label}` +
+    `${key === c.key ? (dir === -1 ? ' ↓' : ' ↑') : ''}</th>`).join('') + '</tr>';
+  const body = stats.map(e => '<tr>' + ENG_COLS.map(c =>
+    `<td class="${c.num ? 'num' : ''}">${c.cell(e)}</td>`).join('') + '</tr>').join('');
+  const table = document.getElementById('engineers');
+  table.innerHTML = head + body;
+  table.querySelectorAll('th.sortable').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.key;
+      ENG_SORT = { key: k, dir: ENG_SORT.key === k ? -ENG_SORT.dir : (k === 'login' ? 1 : -1) };
+      drawEngineers(rows);
+    };
+  });
+}
+
+// kept for the diagnostics panel: only people with enough reviews to rank
+function reviewerStats(rows) {
+  return engineerStats(rows).map(e => ({ ...e, prs: e.touched })).filter(e => e.median !== null);
 }
 
 function teamStats(rows) {
@@ -460,28 +529,6 @@ function teamStats(rows) {
 
 function rankTable(id, head, rowsHtml) {
   document.getElementById(id).innerHTML = head + rowsHtml;
-}
-
-function drawReviewers(rows) {
-  const all = reviewerStats(rows).sort((a, b) => b.median - a.median);
-  const stats = all.filter(s => s.prs >= MIN_REVIEWS);
-  const thin = all.filter(s => s.prs < MIN_REVIEWS);
-  if (!stats.length) {
-    rankTable('reviewers', '', `<tr><td class="flag">no reviewer answered ${MIN_REVIEWS}+ PRs here</td></tr>`);
-    return;
-  }
-  const max = Math.max(...stats.map(s => s.median), 1);
-  const head = `<tr><th>reviewer</th><th class="num">PRs</th><th class="num">median</th>` +
-               `<th class="num">p75</th><th>relative</th><th class="num">first in</th></tr>`;
-  const body = stats.map(s =>
-    `<tr><td>${s.login}<div class="flag">${s.team}</div></td><td class="num">${s.prs}</td>` +
-    `<td class="num">${hours(s.median)}</td><td class="num flag">${hours(s.p75, 0)}</td>` +
-    `<td><div class="bar-cell"><span style="width:${Math.max(2, s.median / max * 90)}px;background:var(--pickup)"></span></div></td>` +
-    `<td class="num">${s.first}</td></tr>`).join('');
-  const note = thin.length
-    ? `<tr><td colspan="6" class="flag">${thin.length} reviewers hidden — under ${MIN_REVIEWS} PRs, too few to rank</td></tr>`
-    : '';
-  rankTable('reviewers', head, body + note);
 }
 
 function drawTeams(rows) {
@@ -581,7 +628,7 @@ function render() {
     document.getElementById('buckets').innerHTML = '';
     document.getElementById('slowest').innerHTML = '';
     document.getElementById('why').innerHTML = '<li>No PRs match these filters.</li>';
-    document.getElementById('reviewers').innerHTML = '';
+    document.getElementById('engineers').innerHTML = '';
     document.getElementById('teams').innerHTML = '';
     return;
   }
@@ -591,7 +638,7 @@ function render() {
   drawBuckets(buckets);
   drawSlowest(rows);
   drawWhy(rows);
-  drawReviewers(rows);
+  drawEngineers(rows);
   drawTeams(rows);
 }
 
