@@ -1,4 +1,6 @@
 require 'erb'
+require 'json'
+require 'time'
 require 'fileutils'
 
 # ERB -> HTML, stdout summary.
@@ -126,77 +128,12 @@ module Report
     rows.reject { |r| r['total_bh_s'].nil? }.sort_by { |r| -r['total_bh_s'] }.first(limit)
   end
 
-  TEMPLATE = <<~ERB
-    <!doctype html>
-    <meta charset="utf-8"><title>PR cycle time — <%= group_by %></title>
-    <style>
-      body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; color: #222; }
-      h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 2.5rem; }
-      .chart { display: flex; align-items: flex-end; gap: 14px; height: 320px; border-bottom: 1px solid #ccc; padding-top: 1rem; }
-      .col { display: flex; flex-direction: column; justify-content: flex-end; flex: 1; min-width: 40px; }
-      .bar { display: flex; flex-direction: column-reverse; }
-      .seg { min-height: 1px; }
-      .xlab { font-size: 11px; text-align: center; padding-top: 6px; color: #555; word-break: break-all; }
-      .sup { color: #999; text-align: center; font-size: 11px; }
-      .legend span { margin-right: 1rem; font-size: 12px; }
-      .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; }
-      table { border-collapse: collapse; width: 100%; font-size: 13px; }
-      th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #eee; }
-      td.num { text-align: right; font-variant-numeric: tabular-nums; }
-      code { font-size: 11px; color: #a33; }
-    </style>
-    <h1>PR cycle time by <%= group_by %></h1>
-    <p>Working hours only — Sunday to Thursday, 09:00–18:00 Amman. Nights, weekends and the wall clock are in
-    <code>data/computed/prs.json</code>.</p>
-    <p class="legend">
-      <% Report::COLORS.each do |seg, color| %>
-        <span><i class="swatch" style="background:<%= color %>"></i><%= Report::LABELS[seg] %></span>
-      <% end %>
-      <span>median per bucket · tallest bar = <%= Report.h(max) %></span>
-    </p>
-    <div class="chart">
-      <% buckets.each do |b| %>
-        <div class="col">
-          <% if b['suppressed'] %>
-            <div class="sup">n=<%= b['n'] %><br>suppressed</div>
-          <% else %>
-            <div class="bar" title="total <%= Report.h(b['total']['median']) %> · n=<%= b['n'] %>">
-              <% Report::COLORS.each do |seg, color| %>
-                <% v = b['stages'][seg]['median'] || 0 %>
-                <div class="seg" style="height:<%= (v / max * 280).round(1) %>px;background:<%= color %>"
-                     title="<%= Report::LABELS[seg] %> <%= Report.h(v) %>"></div>
-              <% end %>
-            </div>
-          <% end %>
-          <div class="xlab"><%= b['bucket'] %></div>
-        </div>
-      <% end %>
-    </div>
-    <h2>Slowest <%= slowest.size %> PRs</h2>
-    <table>
-      <tr><th>PR</th><th>author</th><th class="num">total</th><th class="num">pickup</th>
-          <th class="num">review</th><th class="num">merge-wait</th><th>flags</th></tr>
-      <% slowest.each do |r| %>
-        <tr>
-          <td><a href="<%= r['url'] %>"><%= r['repo'] %>#<%= r['number'] %></a> <%= r['title'][0, 60] %></td>
-          <td><%= r['author'] %></td>
-          <td class="num"><%= Report.h(r['total_bh_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['pickup_bh_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['review_bh_s'], 0) %></td>
-          <td class="num"><%= Report.h(r['merge_wait_bh_s'], 0) %></td>
-          <td><code><%= r['flags'].join(' ') %></code></td>
-        </tr>
-      <% end %>
-    </table>
-  ERB
-
-  def html(buckets, rows, group_by, path)
-    shown = buckets.reject { |b| b['suppressed'] }
-    max = shown.map { |b| Aggregate::SEGMENTS.sum { |s| b['stages'][s]['median'] || 0 } }.max || 1.0
-    max = 1.0 if max.zero?
-    slowest = slowest(rows)
+  def html(_buckets, rows, _group_by, path)
+    rows_json = JSON.generate(rows)
+    generated = Time.now.strftime('%Y-%m-%d %H:%M')
+    template = File.read(File.expand_path('dashboard.html.erb', __dir__))
     FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, ERB.new(TEMPLATE, nil, '-').result(binding))
+    File.write(path, ERB.new(template, nil, '-').result(binding))
     path
   end
 end

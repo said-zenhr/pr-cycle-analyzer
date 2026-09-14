@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR cycle time</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb; --surface-2: #f2f2f0; --border: #dcdcd8;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #77766f;
+    --pickup: #2a78d6; --review: #eb6834; --merge-wait: #1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1: #1a1a19; --surface-2: #232322; --border: #3a3a38;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #94938a;
+      --pickup: #3987e5; --review: #d95926; --merge-wait: #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19; --surface-2: #232322; --border: #3a3a38;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #94938a;
+    --pickup: #3987e5; --review: #d95926; --merge-wait: #199e70;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem 4rem; background: var(--surface-1); color: var(--text-primary);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  .sub { color: var(--text-secondary); margin: 0 0 1.75rem; font-size: .875rem; }
+  .filters {
+    display: flex; flex-wrap: wrap; gap: .75rem 1rem; padding: 1rem; margin-bottom: 1.75rem;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .field { display: flex; flex-direction: column; gap: .3rem; }
+  .field label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+  select, input {
+    font: inherit; font-size: .875rem; padding: .35rem .5rem; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; min-width: 8.5rem;
+  }
+  input[type=number] { min-width: 5.5rem; }
+  button {
+    font: inherit; font-size: .8rem; padding: .4rem .8rem; cursor: pointer; align-self: flex-end;
+    color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .tiles { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.75rem; }
+  .tile { flex: 1 1 8rem; padding: .85rem 1rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+  .tile .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+  .tile .v { font-size: 1.5rem; font-variant-numeric: tabular-nums; margin-top: .15rem; }
+  .legend { display: flex; gap: 1.25rem; margin: 0 0 .5rem; font-size: .8rem; color: var(--text-secondary); }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: .4rem; vertical-align: -1px; }
+  .chartbox { overflow-x: auto; margin-bottom: 2.25rem; }
+  svg { display: block; }
+  svg text { fill: var(--text-secondary); font-size: 11px; }
+  svg text.total { fill: var(--text-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
+  svg .grid { stroke: var(--border); stroke-width: 1; }
+  h2 { font-size: .95rem; margin: 2rem 0 .6rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .825rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.wide { white-space: normal; }
+  a { color: inherit; }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: .35rem; }
+  .flag { color: var(--text-muted); font-size: .7rem; }
+  .empty { color: var(--text-muted); padding: 2rem 0; }
+  .tt {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s; z-index: 10;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 7px;
+    padding: .5rem .65rem; font-size: .78rem; box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: 16rem;
+  }
+  .tt b { display: block; margin-bottom: .25rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PR cycle time</h1>
+  <p class="sub">
+    Working hours only — Sunday to Thursday, 09:00–18:00 Amman. Public holidays are not counted.
+    <%= rows.size %> merged PRs · synced <%= generated %>
+  </p>
+
+  <div class="filters" id="filters"></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="legend">
+    <span><i style="background:var(--pickup)"></i>pickup — waiting for a first human response</span>
+    <span><i style="background:var(--review)"></i>review — first response to last approval</span>
+    <span><i style="background:var(--merge-wait)"></i>merge-wait — approved but not merged</span>
+  </div>
+  <div class="chartbox"><svg id="chart" role="img" aria-label="Median hours per stage"></svg></div>
+
+  <h2>Per bucket</h2>
+  <table id="buckets"></table>
+
+  <h2>Slowest PRs</h2>
+  <table id="slowest"></table>
+</div>
+<div class="tt" id="tt"></div>
+
+<script id="rows" type="application/json"><%= rows_json %></script>
+<script>
+const ROWS = JSON.parse(document.getElementById('rows').textContent);
+const STAGES = [['pickup', 'pickup'], ['review', 'review'], ['merge_wait', 'merge-wait']];
+const MIN_N = 10;
+const F = {}; // active filter state
+
+const uniq = (key) => [...new Set(ROWS.flatMap(r => Array.isArray(r[key]) ? r[key] : [r[key]]))]
+  .filter(v => v !== null && v !== undefined && v !== '').sort();
+
+const hours = (s, d = 1) => s === null || s === undefined ? '—' : (s / 3600).toFixed(d) + 'h';
+
+function percentile(values, p) {
+  if (!values.length) return null;
+  const v = [...values].sort((a, b) => a - b);
+  const rank = p * (v.length - 1), lo = Math.floor(rank), hi = Math.ceil(rank);
+  return v[lo] + (v[hi] - v[lo]) * (rank - lo);
+}
+
+const suffix = () => F.clock === 'wall' ? '_s' : '_bh_s';
+
+function filtered() {
+  return ROWS.filter(r => {
+    if (F.repo && r.repo !== F.repo) return false;
+    if (F.team && r.team !== F.team) return false;
+    if (F.author && r.author !== F.author) return false;
+    if (F.reviewer && !r.reviewers.includes(F.reviewer)) return false;
+    if (F.label && !r.labels.includes(F.label)) return false;
+    if (F.base && r.base_branch !== F.base) return false;
+    if (F.since && r.merged_at < F.since) return false;
+    if (F.until && r.merged_at > F.until + 'T23:59:59Z') return false;
+    if (F.min_size && r.lines_changed < +F.min_size) return false;
+    if (F.max_size && r.lines_changed > +F.max_size) return false;
+    return true;
+  });
+}
+
+function bucketKey(r) {
+  const m = r.merged_at;
+  switch (F.group) {
+    case 'month': return m.slice(0, 7);
+    case 'quarter': return m.slice(0, 4) + '-Q' + (Math.floor((+m.slice(5, 7) - 1) / 3) + 1);
+    case 'year': return m.slice(0, 4);
+    case 'all': return 'all time';
+    default: return r.week;
+  }
+}
+
+function group(rows) {
+  const out = new Map();
+  const push = (k, r) => { if (!out.has(k)) out.set(k, []); out.get(k).push(r); };
+  for (const r of rows) {
+    if (F.group === 'reviewer') (r.reviewers.length ? r.reviewers : ['(none)']).forEach(v => push(v, r));
+    else if (F.group === 'label') (r.labels.length ? r.labels : ['(none)']).forEach(v => push(v, r));
+    else if (['repo', 'author', 'team'].includes(F.group)) push(r[F.group === 'repo' ? 'repo' : F.group] || '(none)', r);
+    else push(bucketKey(r), r);
+  }
+  return [...out.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1);
+}
+
+function summarize(name, rows) {
+  const sfx = suffix();
+  const scored = rows.filter(r => r['total' + sfx] !== null);
+  const stages = {};
+  for (const [key] of STAGES) {
+    const vals = scored.map(r => r[key + sfx]).filter(v => v !== null);
+    stages[key] = { median: percentile(vals, 0.5), p75: percentile(vals, 0.75) };
+  }
+  const bottleneck = STAGES.map(([k]) => k).reduce((a, b) => (stages[a].median || 0) >= (stages[b].median || 0) ? a : b);
+  return {
+    name, rows, n: scored.size || scored.length, stages, bottleneck,
+    total: percentile(scored.map(r => r['total' + sfx]), 0.5),
+    wall: percentile(scored.map(r => r.total_s), 0.5),
+    flagged: rows.filter(r => r.flags.length).length,
+    suppressed: scored.length < MIN_N
+  };
+}
+
+/* ---------- filters ---------- */
+const FIELDS = [
+  ['repo', 'repo', 'repo'], ['team', 'team', 'team'], ['author', 'author', 'author'],
+  ['reviewer', 'reviewers', 'reviewer'], ['label', 'labels', 'label'], ['base', 'base_branch', 'base branch']
+];
+
+function buildFilters() {
+  const box = document.getElementById('filters');
+  const field = (label, el) => {
+    const d = document.createElement('div'); d.className = 'field';
+    const l = document.createElement('label'); l.textContent = label;
+    d.append(l, el); box.append(d); return el;
+  };
+  const select = (name, options, labelText, initial) => {
+    const s = document.createElement('select');
+    s.innerHTML = options.map(o => `<option value="${o[0]}">${o[1]}</option>`).join('');
+    s.value = initial ?? '';
+    F[name] = s.value;
+    s.onchange = () => { F[name] = s.value; render(); };
+    return field(labelText, s);
+  };
+
+  select('group', [['week', 'week'], ['month', 'month'], ['quarter', 'quarter'], ['year', 'year'],
+                   ['all', 'all time'], ['repo', 'repo'], ['team', 'team'], ['author', 'author'],
+                   ['reviewer', 'reviewer'], ['label', 'label']], 'group by', 'week');
+  select('clock', [['bh', 'working hours'], ['wall', 'elapsed']], 'clock', 'bh');
+  for (const [name, key, labelText] of FIELDS) {
+    select(name, [['', 'all']].concat(uniq(key).map(v => [v, v])), labelText, '');
+  }
+  for (const [name, labelText] of [['since', 'merged from'], ['until', 'merged to']]) {
+    const i = document.createElement('input'); i.type = 'date';
+    i.onchange = () => { F[name] = i.value; render(); };
+    field(labelText, i);
+  }
+  for (const [name, labelText] of [['min_size', 'min lines'], ['max_size', 'max lines']]) {
+    const i = document.createElement('input'); i.type = 'number'; i.min = 0; i.placeholder = '—';
+    i.oninput = () => { F[name] = i.value; render(); };
+    field(labelText, i);
+  }
+  const reset = document.createElement('button');
+  reset.textContent = 'Reset';
+  reset.onclick = () => location.reload();
+  box.append(reset);
+}
+
+/* ---------- chart ---------- */
+const tt = document.getElementById('tt');
+function showTip(e, html) {
+  tt.innerHTML = html; tt.style.opacity = 1;
+  tt.style.left = Math.min(e.clientX + 14, innerWidth - tt.offsetWidth - 10) + 'px';
+  tt.style.top = Math.max(e.clientY - tt.offsetHeight - 12, 8) + 'px';
+}
+const hideTip = () => { tt.style.opacity = 0; };
+
+function drawChart(buckets) {
+  const svg = document.getElementById('chart');
+  const shown = buckets.filter(b => !b.suppressed);
+  const H = 300, PAD_T = 26, PAD_B = 46, PAD_L = 46;
+  const colW = Math.max(62, Math.min(160, Math.floor(980 / Math.max(buckets.length, 1))));
+  const W = PAD_L + colW * buckets.length + 10;
+  const peak = Math.max(...shown.map(b => STAGES.reduce((s, [k]) => s + (b.stages[k].median || 0), 0)), 1);
+  const max = peak * 1.08; // headroom for the total label above the tallest bar
+  const y = v => (H - PAD_B) - (v / max) * (H - PAD_T - PAD_B);
+  const el = (n, a, kids) => {
+    const e = document.createElementNS('http://www.w3.org/2000/svg', n);
+    for (const k in a) e.setAttribute(k, a[k]);
+    (kids || []).forEach(c => e.append(c));
+    return e;
+  };
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.replaceChildren();
+
+  // round grid steps, so the axis never reads 0h 2h 3h 5h 6h
+  const STEPS = [0.25, 0.5, 1, 2, 4, 8, 12, 24, 48, 96, 168, 336, 720];
+  const step = (STEPS.find(h => max / 3600 / h <= 5) || 720) * 3600;
+  for (let v = 0; v <= max + step / 2; v += step) {
+    svg.append(el('line', { class: 'grid', x1: PAD_L - 6, x2: W, y1: y(v), y2: y(v) }));
+    const t = el('text', { x: PAD_L - 10, y: y(v) + 4, 'text-anchor': 'end' });
+    t.textContent = (v / 3600).toFixed(step < 3600 ? 2 : 0) + 'h';
+    svg.append(t);
+  }
+
+  buckets.forEach((b, i) => {
+    const x = PAD_L + i * colW + 8, bw = colW - 18;
+    const lab = el('text', { x: x + bw / 2, y: H - PAD_B + 16, 'text-anchor': 'middle' });
+    lab.textContent = b.name.length > 11 ? b.name.slice(0, 10) + '…' : b.name;
+    const t = el('title'); t.textContent = b.name; lab.append(t);
+    svg.append(lab);
+
+    if (b.suppressed) {
+      const note = el('text', { x: x + bw / 2, y: H - PAD_B - 6, 'text-anchor': 'middle' });
+      note.textContent = 'n=' + b.rows.length;
+      svg.append(note);
+      return;
+    }
+    let acc = 0, total = STAGES.reduce((s, [k]) => s + (b.stages[k].median || 0), 0);
+    STAGES.forEach(([key, label], si) => {
+      const v = b.stages[key].median || 0;
+      if (v <= 0) return;
+      const top = y(acc + v), bottom = y(acc), h = Math.max(bottom - top - 2, 1);
+      const rect = el('rect', {
+        x, y: top, width: bw, height: h, fill: `var(--${label})`,
+        rx: si === STAGES.length - 1 ? 4 : 0
+      });
+      rect.addEventListener('mousemove', e => showTip(e,
+        `<b>${b.name}</b>${label}: ${hours(v)}<br>p75 ${hours(b.stages[key].p75)}<br>n=${b.n}`));
+      rect.addEventListener('mouseleave', hideTip);
+      svg.append(rect);
+      acc += v;
+    });
+    const tl = el('text', { class: 'total', x: x + bw / 2, y: y(total) - 7, 'text-anchor': 'middle' });
+    tl.textContent = hours(total, total / 3600 >= 10 ? 0 : 1);
+    svg.append(tl);
+  });
+}
+
+/* ---------- tables ---------- */
+function drawBuckets(buckets) {
+  const head = `<tr><th>${F.group}</th><th class="num">n</th>` +
+    STAGES.map(([, l]) => `<th class="num">${l}</th>`).join('') +
+    `<th class="num">total</th><th class="num">elapsed</th><th>bottleneck</th><th class="num">flagged</th></tr>`;
+  const body = buckets.map(b => {
+    if (b.suppressed) {
+      return `<tr><td>${b.name}</td><td class="num">${b.rows.length}</td>` +
+             `<td colspan="6" class="flag">below ${MIN_N} PRs — median suppressed</td></tr>`;
+    }
+    return `<tr><td>${b.name}</td><td class="num">${b.n}</td>` +
+      STAGES.map(([k, l]) =>
+        `<td class="num"><span class="swatch" style="background:var(--${l})"></span>${hours(b.stages[k].median)}` +
+        `<span class="flag"> / ${hours(b.stages[k].p75, 0)}</span></td>`).join('') +
+      `<td class="num">${hours(b.total)}</td><td class="num flag">${hours(b.wall, 0)}</td>` +
+      `<td>${b.bottleneck.replace('_', '-')}</td><td class="num">${b.flagged || ''}</td></tr>`;
+  }).join('');
+  document.getElementById('buckets').innerHTML = head + body;
+}
+
+function drawSlowest(rows) {
+  const sfx = suffix();
+  const top = rows.filter(r => r['total' + sfx] !== null)
+                  .sort((a, b) => b['total' + sfx] - a['total' + sfx]).slice(0, 10);
+  const head = `<tr><th>PR</th><th>author</th><th class="num">total</th>` +
+    STAGES.map(([, l]) => `<th class="num">${l}</th>`).join('') + `<th>flags</th></tr>`;
+  const body = top.map(r =>
+    `<tr><td class="wide"><a href="${r.url}">${r.repo}#${r.number}</a> ${r.title.slice(0, 64)}</td>` +
+    `<td>${r.author}</td><td class="num">${hours(r['total' + sfx], 0)}</td>` +
+    STAGES.map(([k, l]) =>
+      `<td class="num"><span class="swatch" style="background:var(--${l})"></span>${hours(r[k + sfx], 0)}</td>`).join('') +
+    `<td class="flag">${r.flags.join(' ')}</td></tr>`).join('');
+  document.getElementById('slowest').innerHTML = head + body;
+}
+
+function drawTiles(rows, buckets) {
+  const all = summarize('all', rows);
+  const tiles = [
+    ['PRs', rows.length],
+    ['median cycle', hours(all.total)],
+    ['p75 pickup', hours(percentile(rows.map(r => r['pickup' + suffix()]).filter(v => v !== null), 0.75))],
+    ['bottleneck', all.n >= MIN_N ? all.bottleneck.replace('_', '-') : '—'],
+    ['flagged', all.flagged]
+  ];
+  document.getElementById('tiles').innerHTML = tiles
+    .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+
+function render() {
+  const rows = filtered();
+  if (!rows.length) {
+    document.getElementById('tiles').innerHTML = '<p class="empty">No PRs match these filters.</p>';
+    document.getElementById('chart').replaceChildren();
+    document.getElementById('buckets').innerHTML = '';
+    document.getElementById('slowest').innerHTML = '';
+    return;
+  }
+  const buckets = group(rows).map(([name, rs]) => summarize(name, rs));
+  drawTiles(rows, buckets);
+  drawChart(buckets);
+  drawBuckets(buckets);
+  drawSlowest(rows);
+}
+
+buildFilters();
+render();
+</script>
+</body>
+</html>

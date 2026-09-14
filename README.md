@@ -39,8 +39,18 @@ bin/pr-cycle report --group-by author            # recompute from persisted raw,
 ```
 
 `sync` writes `data/raw/<repo>/<date>.json` and every report recomputes from those files, so stage definitions
-can change without re-fetching. Computed rows land in `data/computed/prs.json`; the chart in
-`data/computed/report.html`.
+can change without re-fetching. Computed rows land in `data/computed/prs.json`, the dashboard in
+`data/computed/dashboard.html`.
+
+## Dashboard
+
+Every run writes `data/computed/dashboard.html` — one self-contained file with the rows embedded. Open it in a
+browser, no server and no install. Dropdowns for group-by, working-hours vs elapsed, repo, team, author, reviewer,
+label, base branch, merge date range and PR size; everything recomputes client-side. Stacked bars with hover
+detail, a per-bucket table, and the slowest ten PRs with links.
+
+Send the file to anyone — it is a single file and it works offline. It is a snapshot as of the last `sync`, and
+the header says when that was. Light and dark follow the reader's system theme.
 
 ### Flags
 
