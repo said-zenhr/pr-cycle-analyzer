@@ -115,7 +115,7 @@
   <h1>PR cycle time</h1>
   <p class="sub">
     Working hours only — Sunday to Thursday, 09:00–18:00 Amman. Public holidays are not counted.
-    <%= rows.size %> merged PRs · synced <%= generated %>
+    <span id="scope"><%= rows.size %> merged PRs</span> · synced <%= generated %>
   </p>
 
   <div class="filters" id="filters"></div>
@@ -154,9 +154,6 @@ const MIN_N = 10;
 const MIN_REVIEWS = 5; // below this a reviewer median is noise, not a ranking
 const F = {}; // active filter state
 
-const uniq = (key) => [...new Set(ROWS.flatMap(r => Array.isArray(r[key]) ? r[key] : [r[key]]))]
-  .filter(v => v !== null && v !== undefined && v !== '').sort();
-
 const hours = (s, d = 1) => s === null || s === undefined ? '—' : (s / 3600).toFixed(d) + 'h';
 
 function percentile(values, p) {
@@ -168,14 +165,19 @@ function percentile(values, p) {
 
 const suffix = () => F.clock === 'wall' ? '_s' : '_bh_s';
 
-function filtered() {
+const MULTI = {};
+
+// `except` skips one dimension, so a dropdown can offer what is still reachable
+// through every OTHER active filter rather than only what is already selected.
+function filtered(except) {
   return ROWS.filter(r => {
-    if (F.repo.size && !F.repo.has(r.repo)) return false;
-    if (F.team.size && !F.team.has(r.team)) return false;
-    if (F.author.size && !F.author.has(r.author)) return false;
-    if (F.reviewer.size && !r.reviewers.some(v => F.reviewer.has(v))) return false;
-    if (F.label.size && !r.labels.some(v => F.label.has(v))) return false;
-    if (F.base.size && !F.base.has(r.base_branch)) return false;
+    const on = n => n !== except && F[n].size;
+    if (on('repo') && !F.repo.has(r.repo)) return false;
+    if (on('team') && !F.team.has(r.team)) return false;
+    if (on('author') && !F.author.has(r.author)) return false;
+    if (on('reviewer') && !r.reviewers.some(v => F.reviewer.has(v))) return false;
+    if (on('label') && !r.labels.some(v => F.label.has(v))) return false;
+    if (on('base') && !F.base.has(r.base_branch)) return false;
     if (F.since && r.merged_at < F.since) return false;
     if (F.until && r.merged_at > F.until + 'T23:59:59Z') return false;
     if (F.min_size && r.lines_changed < +F.min_size) return false;
@@ -247,26 +249,16 @@ function buildFilters() {
     return field(labelText, s);
   };
 
-  // multi-select: native details + checkboxes, no library, keyboard reachable
-  const multi = (name, values, labelText) => {
+  // multi-select: native details + checkboxes, no library, keyboard reachable.
+  // Options are rebuilt on every render against the other active filters.
+  const multi = (name, key, labelText) => {
     F[name] = new Set();
     const d = document.createElement('details'); d.className = 'ms';
     const sum = document.createElement('summary'); sum.textContent = 'all';
     const list = document.createElement('div'); list.className = 'ms-list';
-    values.forEach(v => {
-      const l = document.createElement('label');
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = v;
-      cb.onchange = () => {
-        cb.checked ? F[name].add(v) : F[name].delete(v);
-        sum.textContent = F[name].size === 0 ? 'all'
-          : F[name].size === 1 ? [...F[name]][0] : F[name].size + ' selected';
-        render();
-      };
-      l.append(cb, document.createTextNode(v));
-      list.append(l);
-    });
     d.append(sum, list);
     document.addEventListener('click', e => { if (!d.contains(e.target)) d.open = false; });
+    MULTI[name] = { key, summary: sum, list };
     return field(labelText, d);
   };
 
@@ -274,7 +266,7 @@ function buildFilters() {
                    ['all', 'all time'], ['repo', 'repo'], ['team', 'team'], ['author', 'author'],
                    ['reviewer', 'reviewer'], ['label', 'label']], 'group by', 'week');
   select('clock', [['bh', 'working hours'], ['wall', 'elapsed']], 'clock', 'bh');
-  for (const [name, key, labelText] of FIELDS) multi(name, uniq(key), labelText);
+  for (const [name, key, labelText] of FIELDS) multi(name, key, labelText);
   for (const [name, labelText] of [['since', 'merged from'], ['until', 'merged to']]) {
     const i = document.createElement('input'); i.type = 'date';
     i.onchange = () => { F[name] = i.value; render(); };
@@ -620,8 +612,40 @@ function drawWhy(rows) {
   document.getElementById('why').innerHTML = out.join('') || '<li>Not enough data for these filters.</li>';
 }
 
+// Every dropdown shows only values still reachable, with how many PRs each adds.
+// A selected value that no longer matches stays visible at 0, so it can be undone.
+function refreshOptions() {
+  for (const [name, m] of Object.entries(MULTI)) {
+    const pool = filtered(name);
+    const counts = new Map();
+    for (const r of pool) {
+      const vals = Array.isArray(r[m.key]) ? r[m.key] : [r[m.key]];
+      for (const v of vals) if (v) counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    for (const v of F[name]) if (!counts.has(v)) counts.set(v, 0);
+
+    m.list.replaceChildren();
+    [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).forEach(([v, n]) => {
+      const l = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.value = v; cb.checked = F[name].has(v);
+      cb.onchange = () => { cb.checked ? F[name].add(v) : F[name].delete(v); render(); };
+      const count = document.createElement('span');
+      count.className = 'flag'; count.style.marginLeft = 'auto'; count.textContent = n;
+      l.append(cb, document.createTextNode(v), count);
+      m.list.append(l);
+    });
+    m.summary.textContent = F[name].size === 0 ? 'all'
+      : F[name].size === 1 ? [...F[name]][0] : F[name].size + ' selected';
+  }
+}
+
 function render() {
   const rows = filtered();
+  refreshOptions();
+  document.getElementById('scope').textContent = rows.length === ROWS.length
+    ? `${ROWS.length} merged PRs`
+    : `${rows.length} of ${ROWS.length} merged PRs`;
   if (!rows.length) {
     document.getElementById('tiles').innerHTML = '<p class="empty">No PRs match these filters.</p>';
     document.getElementById('chart').replaceChildren();

@@ -75,6 +75,16 @@ off GitHub. It is there to find rubber-stamping, which needs a human to confirm.
 
 **Teams** are ranked both ways: median cycle time on PRs they author, and median response time on PRs they review.
 
+Everything on the page is derived from the current filters — the PR count in the header, the tiles, the chart, the
+diagnostics, both tables. Dropdowns cascade: each one offers only values still reachable through the other active
+filters, with a count beside each, so a combination that returns nothing is not selectable. A value you selected
+that later matches nothing stays listed at 0 so you can undo it.
+
+Fixed at generate time: the row set (whatever the last `sync` fetched), the team map from `config/teams.yml`, and
+the working-hours definition in `lib/compute.rb`. The clock toggle switches between two numbers computed in Ruby,
+so changing the work week means editing `Compute::WORK_DAYS` / `DAY_START` / `DAY_END` and re-running `report` —
+no re-fetch, it recomputes from raw.
+
 Send the file to anyone — it is a single file and it works offline. It is a snapshot as of the last `sync`, and
 the header says when that was. Light and dark follow the reader's system theme.
 
